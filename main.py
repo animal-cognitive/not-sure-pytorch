@@ -89,7 +89,7 @@ def train(epoch, loader):
         loss.backward()
         optimizer.step()
 
-        train_loss += loss.item()
+        train_loss += loss.data.item()
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
@@ -110,7 +110,7 @@ def test(epoch, loader):
             outputs = net(inputs)
             loss = criterion(outputs, targets)
 
-            test_loss += loss.item()
+            test_loss += loss.data.item()
             _, predicted = outputs.max(1)
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
