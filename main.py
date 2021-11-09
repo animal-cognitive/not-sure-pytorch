@@ -1,5 +1,5 @@
 '''Train CIFAR10 with PyTorch.'''
-
+# pip install git+https://github.com/ildoonet/pytorch-randaugment
 # main.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets
 
 import torch, os
