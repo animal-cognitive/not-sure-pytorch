@@ -1,4 +1,7 @@
 '''Train CIFAR10 with PyTorch.'''
+
+# main.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets
+
 import torch, os
 import torch.nn as nn
 import torch.optim as optim
