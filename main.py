@@ -178,5 +178,5 @@ for dataset in dataset_list:
 
                 with open(current_dataset_file, 'a') as f:
                     if epoch + 1 == args.epochs:
-                        print("Test result for iteration ", iteration, " model: ", trial, file = f)
+                        print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
                         print(make_prediction(net, testset.classes, testloader, 'save'), file = f)
