@@ -16,6 +16,9 @@ import argparse
 from models import *
 from utils import progress_bar, make_prediction
 
+#Step 1
+from RandAugment import RandAugment
+
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -25,7 +28,7 @@ parser.add_argument('--dataset_dir', default='Data', type=str,
                     help='The location of the dataset to be explored')
 parser.add_argument('--trials', default=5, type=int,
                     help='Number of times to run the complete experiment')
-parser.add_argument('--iterations', default=6, type=int,
+parser.add_argument('--iterations', default=2, type=int,
                     help='Number of times to run the complete experiment')
 parser.add_argument('--epochs', default=200, type=int,
                     help='total epochs to run')
@@ -35,6 +38,20 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
+torch.manual_seed(123)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(123)
+
+if not os.path.exists(args.dataset_dir):
+    file_utils.create_dir(args.dataset_dir)
+
+dataset_list = sorted(glob.glob(args.dataset_dir + "/*"))
+print("Dataset List: ", dataset_list)
+
+if len(dataset_list) == 0:
+    print("ERROR: 1. Add the Datasets to be run inside of the", args.dataset_dir, "folder")
+    sys.exit()
+
 # Data
 print('==> Preparing data..')
 transform_train = transforms.Compose([
@@ -43,6 +60,10 @@ transform_train = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
+
+# Step 2
+## Initialize `RandAugment` object
+transform_train.transforms.insert(0, RandAugment(3, 7))
 
 transform_test = transforms.Compose([
     transforms.ToTensor(),
@@ -117,23 +138,17 @@ if args.resume:
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
 
-dataset_list = sorted(glob.glob(args.dataset_dir + "/*"))
-dataset_test_dir = dataset_list[0]
-dataset_list = dataset_list[1:]
-print("The datasets are: ", dataset_list)
-
 
 for dataset in dataset_list:
     for iteration in range(args.iterations):
 
         current_dataset_file = dataset.split("/")[-1] + '_.txt'
-        dataset_path = dataset + "/iteration_" + str(iteration)
-        trainset = datasets.ImageFolder(os.path.join(dataset_path),
+        trainset = datasets.ImageFolder(os.path.join(dataset),
                                               transform_train)
         trainloader = torch.utils.data.DataLoader(
             trainset, batch_size=128, shuffle=True, num_workers=2)
 
-        testset = datasets.ImageFolder(os.path.join(dataset_test_dir, 'test'),
+        testset = datasets.ImageFolder(os.path.join(dataset, 'test'),
                                               transform_test)
         testloader = torch.utils.data.DataLoader(
             testset, batch_size=100, shuffle=False, num_workers=2)
@@ -153,9 +168,6 @@ for dataset in dataset_list:
 
         best_acc = 0  # best test accuracy
         start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-
-        # classes = ('plane', 'car', 'bird', 'cat', 'deer',
-        #            'dog', 'frog', 'horse', 'ship', 'truck')
 
         for trial in range(args.trials):
             print("Working on dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
