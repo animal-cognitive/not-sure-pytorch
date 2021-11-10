@@ -146,7 +146,7 @@ for dataset in dataset_list:
     for iteration in range(args.iterations):
 
         current_dataset_file = dataset.split("/")[-1] + '_.txt'
-        trainset = datasets.ImageFolder(os.path.join(dataset),
+        trainset = datasets.ImageFolder(os.path.join(dataset, 'train'),
                                               transform_train)
         trainloader = torch.utils.data.DataLoader(
             trainset, batch_size=128, shuffle=True, num_workers=2)
