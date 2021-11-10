@@ -158,7 +158,7 @@ for dataset in dataset_list:
 
         # Model
         print('==> Building model..')
-        net = ResNet18()
+        net = ResNet18(num_classes=len(testset.classes))
         net = net.to(device)
         if device == 'cuda':
             net = torch.nn.DataParallel(net)
