@@ -173,7 +173,7 @@ for dataset in dataset_list:
 
             best_acc = 0  # best test accuracy
             start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-            
+
             for epoch in range(args.epochs):
                 train(epoch, trainloader)
                 test(epoch, testloader)
@@ -181,5 +181,7 @@ for dataset in dataset_list:
 
                 with open(current_dataset_file, 'a') as f:
                     if epoch + 1 == args.epochs:
+                        checkpoint = torch.load('./checkpoint/ckpt.pth')
+                        net.load_state_dict(checkpoint['net'])
                         print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
                         print(make_prediction(net, testset.classes, testloader, 'save'), file = f)
