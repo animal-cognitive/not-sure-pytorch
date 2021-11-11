@@ -156,24 +156,24 @@ for dataset in dataset_list:
         testloader = torch.utils.data.DataLoader(
             testset, batch_size=100, shuffle=False, num_workers=2)
 
-        # Model
-        print('==> Building model..')
-        net = ResNet18(num_classes=len(testset.classes))
-        net = net.to(device)
-        if device == 'cuda':
-            net = torch.nn.DataParallel(net)
-            cudnn.benchmark = True
-
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(net.parameters(), lr=args.lr,
-                              momentum=0.9, weight_decay=5e-4)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
-
-        best_acc = 0  # best test accuracy
-        start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-
         for trial in range(args.trials):
             print("Working on dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
+            # Model
+            print('==> Building model..')
+            net = ResNet18(num_classes=len(testset.classes))
+            net = net.to(device)
+            if device == 'cuda':
+                net = torch.nn.DataParallel(net)
+                cudnn.benchmark = True
+
+            criterion = nn.CrossEntropyLoss()
+            optimizer = optim.SGD(net.parameters(), lr=args.lr,
+                                  momentum=0.9, weight_decay=5e-4)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+
+            best_acc = 0  # best test accuracy
+            start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+            
             for epoch in range(args.epochs):
                 train(epoch, trainloader)
                 test(epoch, testloader)
