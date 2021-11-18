@@ -3,7 +3,7 @@
     - msr_init: net parameter initialization.
     - progress_bar: progress bar mimic xlua.progress.
 '''
-import os
+import os, shutil
 import sys
 import time
 import math
@@ -172,3 +172,59 @@ def make_prediction(net, class_names, loader, name_to_save):
     preds = get_pred_as_list(all_preds)
     cm = confusion_matrix(targets, preds)
     return classification_report(targets, preds, target_names=class_names)
+
+# Methods to help with creating directories
+
+def delete_dir_if_exists(directory):
+    """
+    Remove a directory if it exists
+
+    dir - Directory to remove
+    """
+
+    if os.path.exists(directory):
+        shutil.rmtree(directory)
+
+def create_dir(directory):
+    """
+    Create directory. Deletes and recreate directory if already exists
+
+    Parameter:
+    string - directory - name of the directory to create if it does not already exist
+    """
+
+    delete_dir_if_exists(directory)
+    os.makedirs(directory)
+
+def empty_dir(dir_name):
+    """
+    Remove all files from given directory
+
+    - dir_name - name of directory to remove files from
+    """
+    for f in os.listdir(dir_name):
+        os.remove(os.path.join(dir_name, f))
+
+def copy_all_files(src_dir, dest_dir):
+    """
+    Copies all files from source directory to destination directory
+
+    - src_dir - the source directory to copy from
+    - dest_dir - the destination directory to copy into
+
+    source - https://www.geeksforgeeks.org/copy-all-files-from-one-directory-to-another-using-python/
+    """
+
+    files = os.listdir(src_dir)
+
+    shutil.copytree(src_dir, dest_dir)
+
+def copy_to_other_dir(from_dir, to_dir):
+    """
+    Copy the content of the from directory into the to directory
+
+    from_dir: Directory we are copying its content
+    to_dir: Directory we are copying into
+    """
+
+    shutil.copytree(from_dir, to_dir)

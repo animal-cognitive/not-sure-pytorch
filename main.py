@@ -17,7 +17,8 @@ import os, glob, sys
 import argparse
 
 from models import *
-from utils import progress_bar, make_prediction
+from utils import progress_bar, make_prediction, create_dir
+import torchvision.models as models
 
 #Step 1
 from RandAugment import RandAugment
@@ -35,6 +36,10 @@ parser.add_argument('--iterations', default=2, type=int,
                     help='Number of times to run the complete experiment')
 parser.add_argument('--epochs', default=200, type=int,
                     help='total epochs to run')
+parser.add_argument('--batch_size', default=4, type=int,
+                    help='Number of images per batch')
+parser.add_argument('--image_size', default=32, type=int,
+                    help='input image size')
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -46,7 +51,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed(123)
 
 if not os.path.exists(args.dataset_dir):
-    file_utils.create_dir(args.dataset_dir)
+    create_dir(args.dataset_dir)
 
 dataset_list = sorted(glob.glob(args.dataset_dir + "/*"))
 print("Dataset List: ", dataset_list)
@@ -58,7 +63,7 @@ if len(dataset_list) == 0:
 # Data
 print('==> Preparing data..')
 transform_train = transforms.Compose([
-    transforms.RandomCrop(32, padding=4),
+    transforms.RandomCrop(args.image_size, padding=4),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
@@ -66,9 +71,10 @@ transform_train = transforms.Compose([
 
 # Step 2
 ## Initialize `RandAugment` object
-transform_train.transforms.insert(0, RandAugment(3, 7))
+# transform_train.transforms.insert(0, RandAugment(3, 7))
 
 transform_test = transforms.Compose([
+    transforms.RandomCrop(args.image_size, padding=4),
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
@@ -149,18 +155,25 @@ for dataset in dataset_list:
         trainset = datasets.ImageFolder(os.path.join(dataset, 'train'),
                                               transform_train)
         trainloader = torch.utils.data.DataLoader(
-            trainset, batch_size=128, shuffle=True, num_workers=2)
+            trainset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
         testset = datasets.ImageFolder(os.path.join(dataset, 'test'),
                                               transform_test)
         testloader = torch.utils.data.DataLoader(
-            testset, batch_size=100, shuffle=False, num_workers=2)
+            testset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
         for trial in range(args.trials):
             print("Working on dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
             # Model
             print('==> Building model..')
-            net = ResNet18(num_classes=len(testset.classes))
+
+            if args.image_size == 32:
+                net = ResNet18(num_classes=len(testset.classes))
+            else:
+                net = models.densenet161()
+                net.classifier = nn.Linear(net.classifier.in_features, len(testset.classes))
+            # print(net)
+
             net = net.to(device)
             if device == 'cuda':
                 net = torch.nn.DataParallel(net)
