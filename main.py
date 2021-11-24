@@ -1,6 +1,6 @@
 '''Train CIFAR10 with PyTorch.'''
 # pip install git+https://github.com/ildoonet/pytorch-randaugment
-# main.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets
+# main.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets --image_size 224
 
 import torch, os
 import torch.nn as nn
@@ -20,9 +20,36 @@ from models import *
 from utils import progress_bar, make_prediction, create_dir
 import torchvision.models as models
 
+#0. Import needed libraries
+import torchvision, torch
+from torchvision import datasets, models, transforms
+from PIL import Image
+import matplotlib.pyplot as plt
+
 #Step 1
 from RandAugment import RandAugment
 
+#1. Testing MitosisAugment
+class MitosisAugment:
+    def __init__(self, transforms_random, data_transforms):
+        self.transforms_random = transforms_random
+        self.data_transforms = data_transforms
+
+    def __call__(self, img):
+        img = self.data_transforms(img)
+        
+        r = self.transforms_random(img[0])
+        q = self.transforms_random(img[1])
+        s = self.transforms_random(img[2])
+        t = self.transforms_random(img[3])
+
+        x1 = torch.cat((r, q), 2)
+        x2 = torch.cat((s, t), 2)
+
+        img = torch.cat((x1, x2), 1)
+
+        return transforms.ToPILImage()(img.squeeze_(0))
+#         return img.ToPILImage()
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -36,7 +63,7 @@ parser.add_argument('--iterations', default=2, type=int,
                     help='Number of times to run the complete experiment')
 parser.add_argument('--epochs', default=200, type=int,
                     help='total epochs to run')
-parser.add_argument('--batch_size', default=4, type=int,
+parser.add_argument('--batch_size', default=32, type=int,
                     help='Number of images per batch')
 parser.add_argument('--image_size', default=32, type=int,
                     help='input image size')
@@ -73,12 +100,33 @@ transform_train = transforms.Compose([
 ## Initialize `RandAugment` object
 # transform_train.transforms.insert(0, RandAugment(3, 7))
 
+# Testing new Augmentation
+data_transforms = {
+    'train': transforms.Compose([
+        transforms.FiveCrop(112),
+        transforms.Lambda(lambda crops: torch.stack([transforms.ToTensor()(crop) for crop in crops])),
+        ]),
+}
+
 transform_test = transforms.Compose([
     transforms.RandomCrop(args.image_size, padding=4),
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
+#2. Add random transforms for MitosisAugment
+rand_augs = transforms.RandomApply(torch.nn.ModuleList([
+            transforms.ColorJitter(),
+            transforms.GaussianBlur(3),
+            transforms.RandomGrayscale(0.6),
+            transforms.RandomInvert(0.6),
+            # transforms.RandomPosterize(4, p = 0.7),
+            transforms.RandomSolarize(45, p = 0.8),
+            # transforms.RandomEqualize(0.9),
+            transforms.RandomAdjustSharpness(0.8)
+            ]), p=0.7)
+mitosis = MitosisAugment(rand_augs, data_transforms['train'])
+transform_train.transforms.insert(0, mitosis)
 
 # Training
 def train(epoch, loader):
@@ -104,7 +152,7 @@ def train(epoch, loader):
                      % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
 
-def test(epoch, loader):
+def test(epoch, loader, current_exp):
     global best_acc
     net.eval()
     test_loss = 0
@@ -135,7 +183,7 @@ def test(epoch, loader):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, './checkpoint/ckpt.pth')
+        torch.save(state, './checkpoint/' + current_exp + 'ckpt.pth')
         best_acc = acc
 
 if args.resume:
@@ -164,6 +212,8 @@ for dataset in dataset_list:
 
         for trial in range(args.trials):
             print("Working on dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
+            current_exp = "_ite_" + str(iteration) + "_trial_" + str(trial) + "_dataset_" + dataset.split("/")[-1] + "_"
+
             # Model
             print('==> Building model..')
 
@@ -189,12 +239,14 @@ for dataset in dataset_list:
 
             for epoch in range(args.epochs):
                 train(epoch, trainloader)
-                test(epoch, testloader)
+                test(epoch, testloader, current_exp)
                 scheduler.step()
 
                 with open(current_dataset_file, 'a') as f:
                     if epoch + 1 == args.epochs:
-                        checkpoint = torch.load('./checkpoint/ckpt.pth')
+                        checkpoint = torch.load('./checkpoint/' + current_exp + 'ckpt.pth')
                         net.load_state_dict(checkpoint['net'])
                         print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
                         print(make_prediction(net, testset.classes, testloader, 'save'), file = f)
+                        print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
+                        print(make_prediction(net, testset.classes, trainloader, 'save'), file = f)
