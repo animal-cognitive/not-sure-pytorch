@@ -1,6 +1,6 @@
 '''Train CIFAR10 with PyTorch.'''
 # pip install git+https://github.com/ildoonet/pytorch-randaugment
-# main.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets --image_size 224
+# not_sure.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets
 
 import os, glob, sys, math, shutil, argparse, torch, torchvision
 
@@ -22,6 +22,8 @@ parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
 parser.add_argument('--dataset_dir', default='Data', type=str,
                     help='The location of the dataset to be explored')
+parser.add_argument('--subset_folder', default='SUBSET_FOLDER', type=str,
+                    help='Temporary location for dataset')
 parser.add_argument('--trials', default=5, type=int,
                     help='Number of times to run the complete experiment')
 parser.add_argument('--iterations', default=2, type=int,
@@ -34,6 +36,8 @@ parser.add_argument('--image_size', default=32, type=int,
                     help='input image size')
 parser.add_argument('--subset_train_iter', default=3, type=int,
                     help='Iterations for the subset training model')
+parser.add_argument('--ns_all', default=500, type=int,
+                    help='Total not-sure images to create')
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -127,7 +131,7 @@ def test_model(net, epoch, loader, current_exp):
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
-        torch.save(state, './checkpoint/' + current_exp + 'ckpt.pth')
+        torch.save(state, f'./checkpoint/{current_exp}ckpt.pth')
         best_acc = acc
 
 def mix(images_from_c, images_from_c_hat, image_size, not_sure_dir, threshold_, min_val_):
@@ -138,16 +142,6 @@ def mix(images_from_c, images_from_c_hat, image_size, not_sure_dir, threshold_, 
 
             file_path = not_sure_dir + img_1.split("/")[-1].split(".")[0] + "_" + img_2.split("/")[-1].split(".")[0] + ".jpg"
             approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
-
-
-if args.resume:
-    # Load checkpoint.
-    print('==> Resuming from checkpoint..')
-    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load('./checkpoint/ckpt.pth')
-    net.load_state_dict(checkpoint['net'])
-    best_acc = checkpoint['acc']
-    start_epoch = checkpoint['epoch']
 
 # Get the train and test transformations
 #################################################
@@ -163,7 +157,7 @@ for dataset in dataset_list:
 
     #2. Create the dataset subset
     ##################################
-    subset_dataset = "SUBSET_FOLDER"
+    subset_dataset = args.subset_folder
     create_subset_dataset(subset_dataset)
 
     #2. Split the dataset training into number_of_splits
@@ -189,11 +183,11 @@ for dataset in dataset_list:
 
         # Run the model
         # ##################################
-        run_experiment(trainloader, testloader, "_subset", args.epochs, net, optimizer, scheduler)
+        run_experiment(trainloader, testloader, subset_dataset, args.epochs, net, optimizer, scheduler)
         # ##################################
 
     # Load best model
-    checkpoint = torch.load(f'./checkpoint/' + "_subset" + 'ckpt.pth')
+    checkpoint = torch.load(f'./checkpoint/{subset_dataset}ckpt.pth')
     net.load_state_dict(checkpoint['net'])
 
     current_dataset_file = dataset.split("/")[-1] + '_.txt'
@@ -216,7 +210,7 @@ for dataset in dataset_list:
     conf_matrix = np.array(confusion_matrix(targets, predictions)).T.tolist()
 
     TFP = calculate_total_false_positives(conf_matrix)
-    NS_ALL = 500 # Average number of images in all classes
+    NS_ALL = args.ns_all # Total number of not-sure images to create
     no_of_classes = len(class_names)
 
     # Construct the GradCAM to use
@@ -289,7 +283,6 @@ for dataset in dataset_list:
     ##################################
 
     for iteration in range(args.iterations):
-
         for trial in range(args.trials):
             print("Working on dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
             current_exp = "_ite_" + str(iteration) + "_trial_" + str(trial) + "_dataset_" + dataset.split("/")[-1] + "_"
