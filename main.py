@@ -37,7 +37,7 @@ class MitosisAugment:
 
     def __call__(self, img):
         img = self.data_transforms(img)
-        
+
         r = self.transforms_random(img[0])
         q = self.transforms_random(img[1])
         s = self.transforms_random(img[2])
@@ -126,7 +126,7 @@ rand_augs = transforms.RandomApply(torch.nn.ModuleList([
             transforms.RandomAdjustSharpness(0.8)
             ]), p=0.7)
 mitosis = MitosisAugment(rand_augs, data_transforms['train'])
-transform_train.transforms.insert(0, mitosis)
+# transform_train.transforms.insert(0, mitosis)
 
 # Training
 def train(epoch, loader):
@@ -222,14 +222,36 @@ for dataset in dataset_list:
             else:
                 net = models.densenet161()
                 net.classifier = nn.Linear(net.classifier.in_features, len(testset.classes))
-            # print(net)
 
             net = net.to(device)
             if device == 'cuda':
                 net = torch.nn.DataParallel(net)
                 cudnn.benchmark = True
 
+            # checkpoint = torch.load('./checkpoint/_ite_0_trial_1_dataset_10%_cifar10_2_classes_ckpt.pth')
+            # # net = torch.nn.DataParallel(net)
+            # net.load_state_dict(checkpoint['net'])
+
+            # print(net)
+
+
+            # net = net.module
+            # net.linear = nn.Linear(net.linear.in_features, len(testset.classes))
+            # net = torch.nn.DataParallel(net)
+            # net = net.to(device)
+            # # print(net)
+            # for name, param in net.named_parameters():
+            #     if "linear" in name:
+            #         # print("LAST: ", name)
+            #         param.requires_grad = True
+            #     else:
+            #         param.requires_grad = False
+
+            # sys.exit()
+
             criterion = nn.CrossEntropyLoss()
+            # optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr,
+            #                       momentum=0.9, weight_decay=5e-4)
             optimizer = optim.SGD(net.parameters(), lr=args.lr,
                                   momentum=0.9, weight_decay=5e-4)
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
