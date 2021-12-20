@@ -1,5 +1,4 @@
 '''Train CIFAR10 with PyTorch.'''
-# pip install git+https://github.com/ildoonet/pytorch-randaugment
 # baseline.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets
 
 import torch, os
@@ -269,6 +268,6 @@ for dataset in dataset_list:
                         checkpoint = torch.load('./checkpoint/' + current_exp + 'ckpt.pth')
                         net.load_state_dict(checkpoint['net'])
                         print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
-                        print(make_prediction(net, testset.classes, testloader, 'save'), file = f)
+                        print(make_prediction(net, testset.classes, testloader), file = f)
                         print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
-                        print(make_prediction(net, testset.classes, trainloader, 'save'), file = f)
+                        print(make_prediction(net, testset.classes, trainloader), file = f)

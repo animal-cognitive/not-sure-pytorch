@@ -1,5 +1,4 @@
 '''Train CIFAR10 with PyTorch.'''
-# pip install git+https://github.com/ildoonet/pytorch-randaugment
 # not_sure.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets
 
 import os, glob, sys, math, shutil, argparse, torch, torchvision
@@ -34,7 +33,7 @@ parser.add_argument('--batch_size', default=32, type=int,
                     help='Number of images per batch')
 parser.add_argument('--image_size', default=32, type=int,
                     help='input image size')
-parser.add_argument('--subset_train_iter', default=3, type=int,
+parser.add_argument('--subset_train_iter', default=2, type=int,
                     help='Iterations for the subset training model')
 parser.add_argument('--ns_all', default=500, type=int,
                     help='Total not-sure images to create')
