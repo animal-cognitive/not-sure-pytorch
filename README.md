@@ -6,7 +6,9 @@
 *trials* Number of trials in each experiment  
 
 ## Run the baseline with the following code
-baseline.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets
+baseline.py --epochs 200 --trials=3 --iterations=1 --dataset_dir=../Datasets
 
 ## Run the not-sure with the following code
-not_sure.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets
+not_sure.py --epochs 200 --trials=3 --iterations=1 --dataset_dir=../Datasets   
+   
+### Remove the Not-Sure folder inside of the train and test dataset after running the not_sure.py file
