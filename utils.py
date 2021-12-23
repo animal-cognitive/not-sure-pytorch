@@ -12,7 +12,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 import torch.nn.init as init
-from models import *
+import models_new as models_new
+import models_old as models_old
 
 import numpy as np
 from PIL import Image
@@ -102,20 +103,24 @@ def copy_to_other_dir(from_dir, to_dir):
     shutil.copytree(from_dir, to_dir)
 
 def get_loaders_and_dataset(dataset, transform_train, transform_test, batch_size):
-    trainset = ImageFolderWithPaths(os.path.join(dataset, 'train'), transform_train)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
 
     testset = ImageFolderWithPaths(os.path.join(dataset, 'test'), transform_test)
     testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
 
+    trainset = ImageFolderWithPaths(os.path.join(dataset, 'train'), transform_train)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
+
     return trainset, trainloader, testset, testloader
 
-def load_model_and_train_params(image_size, device, lr, testset):
+def load_model_and_train_params(image_size, device, lr, testset, weight_decay, old):
     # Model
     print('==> Building model..')
 
     if image_size == 32:
-        net = ResNet18(num_classes=len(testset.classes))
+        if old:
+            net = models_old.ResNet18(num_classes=len(testset.classes))
+        else:
+            net = models_new.ResNet18(num_classes=len(testset.classes))
     else:
         net = models.densenet161()
         net.classifier = nn.Linear(net.classifier.in_features, len(testset.classes))
@@ -127,8 +132,12 @@ def load_model_and_train_params(image_size, device, lr, testset):
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=lr,
-                          momentum=0.9, weight_decay=5e-4)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+                          momentum=0.9, weight_decay=weight_decay)
+
+    if old:
+        scheduler = None
+    else:
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
 
     return net, criterion, optimizer, scheduler
 
@@ -145,6 +154,23 @@ def count_false_positives_for_given_class(class_list, class_c):
 
     # Return the false positive count
     return false_positive_count
+
+def check_dataset_dir(dataset_dir):
+    """
+    Check the directory that holds the dataset
+    """
+
+    if not os.path.exists(dataset_dir):
+        create_dir(dataset_dir)
+
+    dataset_list = sorted(glob.glob(dataset_dir + "/*"))
+    print("Dataset List: ", dataset_list)
+
+    if len(dataset_list) == 0:
+        print("ERROR: 1. Add the Datasets to be run inside of the", dataset_dir, "folder")
+        sys.exit()
+
+    return dataset_list
 
 def calculate_total_false_positives(conf_matrix):
 
@@ -354,8 +380,6 @@ def visualize_image(cam, rgb_img, target_category):
     output = cam.activations_and_grads(input_tensor)
     softmax = torch.nn.Softmax(dim = 1)
 
-    print("PRED: ", softmax(output).tolist())
-
     visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
 
     return visualization
@@ -527,7 +551,6 @@ def recenter_patches(img_1, grayscale_cam_1, img_1_coordinates, img_h, img_w, co
         x2 = max_row - min_row
         y1 = img_w - (max_col - min_col)
         y2 = img_w
-        print(x1, y1, x2, y2)
         img_1_shifted[x1:x2, y1:y2, :] = img_1[min_row:max_row, min_col:max_col, :]
         grayscale_cam_1_shifted[x1:x2, y1:y2] = grayscale_cam_1[min_row:max_row, min_col:max_col]
 
@@ -724,3 +747,111 @@ def format_time(seconds):
     if f == '':
         f = '0ms'
     return f
+
+def adjust_learning_rate(lr, optimizer, epoch):
+    """decrease the learning rate at 100 and 150 epoch"""
+    if epoch >= 100:
+        lr /= 10
+    if epoch >= 150:
+        lr /= 10
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
+def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer, scheduler, best_acc, criterion, device, learning_rate, iteration = None, trial = None, dataset = None, classes = None, current_dataset_file = None):
+    for epoch in range(epochs):
+        train_model(net, epoch, trainloader, optimizer, criterion, device)
+        best_acc = test_model(net, epoch, testloader, current_exp, best_acc, criterion, device)
+
+        if scheduler:
+            scheduler.step()
+        else:
+            adjust_learning_rate(learning_rate, optimizer, epoch)
+
+        if current_dataset_file:
+            with open(current_dataset_file, 'a') as f:
+                if epoch + 1 == epochs:
+                    checkpoint = torch.load('./checkpoint/' + current_exp + 'ckpt.pth')
+                    net.load_state_dict(checkpoint['net'])
+                    if iteration and trial and dataset and classes:
+                        print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
+                        print(make_prediction(net, classes, testloader), file = f)
+                        print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
+                        print(make_prediction(net, classes, trainloader), file = f)
+
+    return best_acc
+
+# Training
+def train_model(net, epoch, loader, optimizer, criterion, device):
+    print('\nEpoch: %d' % epoch)
+    net.train()
+    train_loss = 0
+    correct = 0
+    total = 0
+    for batch_idx, data in enumerate(loader):
+        inputs, targets, file_paths = data
+        inputs, targets = inputs.to(device), targets.to(device)
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+
+        train_loss += loss.data.item()
+        _, predicted = outputs.max(1)
+        total += targets.size(0)
+        correct += predicted.eq(targets).sum().item()
+
+        progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                     % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+
+
+def test_model(net, epoch, loader, current_exp, best_acc, criterion, device):
+    net.eval()
+    test_loss = 0
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for batch_idx, data in enumerate(loader):
+            inputs, targets, file_paths = data
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = net(inputs)
+            loss = criterion(outputs, targets)
+
+            test_loss += loss.data.item()
+            _, predicted = outputs.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
+
+            progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                         % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+
+    # Save checkpoint.
+    acc = 100.*correct/total
+    if acc > best_acc:
+        print('Saving..')
+        state = {
+            'net': net.state_dict(),
+            'acc': acc,
+            'epoch': epoch,
+        }
+        if not os.path.isdir('checkpoint'):
+            os.mkdir('checkpoint')
+        torch.save(state, f'./checkpoint/{current_exp}ckpt.pth')
+        best_acc = acc
+
+    return best_acc
+
+def mix(cam, images_from_c, images_from_c_hat, image_size, not_sure_dir, threshold_, min_val_, approach):
+    if images_from_c and images_from_c_hat:
+        for i in range(len(images_from_c_hat)):
+            img_1 = images_from_c_hat[i]
+            img_2 = images_from_c[i]
+
+            file_path = not_sure_dir + img_1.split("/")[-1].split(".")[0] + "_" + img_2.split("/")[-1].split(".")[0] + ".jpg"
+            if approach == 1:
+                approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
+            elif approach == 2:
+                approach_2(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
+            else:
+                approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
+                approach_2(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
