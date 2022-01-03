@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torch.autograd import Variable
+
 
 class Block(nn.Module):
     '''Grouped convolution block.'''
@@ -89,7 +91,7 @@ def ResNeXt29_32x4d():
 def test_resnext():
     net = ResNeXt29_2x64d()
     x = torch.randn(1,3,32,32)
-    y = net(x)
+    y = net(Variable(x))
     print(y.size())
 
 # test_resnext()

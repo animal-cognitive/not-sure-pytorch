@@ -14,6 +14,9 @@ import torch.backends.cudnn as cudnn
 import torch.nn.init as init
 import models_new as models_new
 import models_old as models_old
+import models
+from torchvision.utils import save_image as torch_save_image
+
 
 import numpy as np
 from PIL import Image
@@ -39,6 +42,9 @@ def get_transforms():
     ])
 
     return transform_train, transform_test
+
+def rand(max):
+    return random.randint(0,max - 1)
 
 # Methods to help with creating directories
 
@@ -112,23 +118,49 @@ def get_loaders_and_dataset(dataset, transform_train, transform_test, batch_size
 
     return trainset, trainloader, testset, testloader
 
-def load_model_and_train_params(image_size, device, lr, testset, weight_decay, old):
+def load_model_and_train_params(image_size, device, lr, testset, old):
     # Model
-    print('==> Building model..')
 
+    weight_decay = 1e-4
+    print('==> Building model..')
     if image_size == 32:
         if old:
-            net = models_old.ResNet18(num_classes=len(testset.classes))
+            net = models.__dict__['ResNet18'](num_classes=len(testset.classes))
+            # net = models_old.ResNet18(num_classes=len(testset.classes))
         else:
+            weight_decay = 5e-4
             net = models_new.ResNet18(num_classes=len(testset.classes))
+
+        net = net.to(device)
+        ### Update the number of classes to predict
+        num_ftrs = net.linear.in_features
+        # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
+        net.linear = nn.Linear(num_ftrs, len(testset.classes))
     else:
         net = models.densenet161()
         net.classifier = nn.Linear(net.classifier.in_features, len(testset.classes))
 
-    net = net.to(device)
     if device == 'cuda':
+        net.cuda()
         net = nn.DataParallel(net)
         cudnn.benchmark = True
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(net.parameters(), lr=lr,
+                          momentum=0.9, weight_decay=weight_decay)
+
+    if old:
+        scheduler = None
+    else:
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+
+    return net, criterion, optimizer, scheduler
+
+def load_current_model_and_train_params(net, lr, old):
+    # Model
+
+    weight_decay = 1e-4
+    print('==> Loading existing model..')
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=lr,
@@ -405,6 +437,15 @@ def load_self_pretrained_model(pretrained_model_path = './checkpoint/_ite_0_tria
 
     return net.module
 
+def load_self_pretrained_model_v2(net, pretrained_model_path = './checkpoint/_ite_0_trial_0_dataset_10%_cifar10_2_classes_ckpt.pth'):
+
+    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
+    checkpoint = torch.load(pretrained_model_path, map_location=torch.device('cpu'))
+
+    net.load_state_dict(checkpoint['net'])
+
+    return net
+
 def grayscale_to_3d(grayscale_cam):
     """
     Convert the Grayscale CAM to 3D
@@ -637,6 +678,100 @@ def approach_2(img_1_, img_2_, img_h_, img_w_, cam, filename, threshold_, min_va
 
     save_image(output_img_, filename + ".png")
 
+def approach_3(img_1_, img_2_, img_h_, img_w_, file_path):
+
+    img1 = Image.open(img_1_)
+    img2 = Image.open(img_2_)
+
+    img1 = np.asarray(img1.resize((img_h_, img_w_)))
+    img2 = np.asarray(img2.resize((img_h_, img_w_)))
+
+    mean_img = np.mean([img1, img2], axis=0)
+    img = Image.fromarray(np.uint8(mean_img))
+
+    img.save(file_path)
+
+def approach_4(img_1_, img_2_, img_h_, img_w_, file_path, count):
+
+    data_split_transform = transforms.Compose([
+        transforms.FiveCrop(int(img_h_ / 2)),
+        transforms.Lambda(lambda crops: torch.stack([transforms.ToTensor()(crop) for crop in crops])),
+    ])
+
+    img1 = data_split_transform(Image.open(img_1_))
+    img2 = data_split_transform(Image.open(img_2_))
+
+    max = img1.shape[0]
+
+    first = rand(max)
+    second = rand(max)
+    third = rand(max)
+    fourth = rand(max)
+
+    if count % 2 == 0:
+        x1 = torch.cat((img1[first], img2[second]), 2)
+        x2 = torch.cat((img2[third], img1[fourth]), 2)
+    else:
+        x1 = torch.cat((img1[first], img1[second]), 2)
+        x2 = torch.cat((img2[third], img2[fourth]), 2)
+
+    x = torch.cat((x1, x2), 1)
+
+    x = x.numpy().transpose((1, 2, 0))
+    x = np.clip(x, 0, 1)
+
+    torch_save_image(torch.from_numpy(x.transpose(2, 0, 1)), file_path)
+
+def approach_5(img_1_, img_2_, img_h_, img_w_, cam, filename, threshold_, min_val_, count):
+    """
+    Get the important part of the two images, but only get the 16*16 section of it
+    Mix approach 2 and 4 together
+    """
+
+    rgb_img_1, rgb_img_2, grayscale_cam_1_, grayscale_cam_2, img_1_coordinates_, img_2_coordinates_ = get_rgbs_grayscale_coordinates(cam, img_1_, img_2_, img_h_, img_w_, threshold_, min_val_)
+
+    center_row1, center_col1, row_diameter1, col_diameter1 = get_centers(img_1_coordinates_)
+    center_row2, center_col2, row_diameter2, col_diameter2 = get_centers(img_2_coordinates_)
+
+    # Compute min and max rows and cols
+    min_row1, max_row1 = get_correct_min_max_row_or_col(center_row1, img_h_)
+    min_col1, max_col1 = get_correct_min_max_row_or_col(center_col1, img_w_)
+
+    min_row2, max_row2 = get_correct_min_max_row_or_col(center_row2, img_h_)
+    min_col2, max_col2 = get_correct_min_max_row_or_col(center_col2, img_w_)
+
+    # Ensure center is away from the edges
+    img1 = rgb_img_1[min_row1:max_row1, min_col1:max_col1, :]
+    img2 = rgb_img_2[min_row2:max_row2, min_col2:max_col2, :]
+
+    if count % 3 == 0:
+        x1 = torch.cat((torch.from_numpy(img1), torch.from_numpy(img1)))
+        x2 = torch.cat((torch.from_numpy(img2), torch.from_numpy(img2)))
+    elif count % 3 == 1:
+        x1 = torch.cat((torch.from_numpy(img1), torch.from_numpy(img2)))
+        x2 = torch.cat((torch.from_numpy(img2), torch.from_numpy(img1)))
+    elif count % 3 == 2:
+        x1 = torch.cat((torch.from_numpy(img1), torch.from_numpy(img2)))
+        x2 = torch.cat((torch.from_numpy(img1), torch.from_numpy(img2)))
+    x = torch.cat((x1, x2), 1)
+    save_image(x, filename)
+
+def get_correct_min_max_row_or_col(center_row1, img_h_):
+    needed_h_radius = img_h_ / 4
+
+    min_row = center_row1 - needed_h_radius
+    max_row = center_row1 + needed_h_radius
+
+    if min_row < 0:
+        min_row = 0
+        max_row = needed_h_radius * 2
+
+    if max_row > img_h_:
+        max_row = img_h_ - 1
+        min_row = max_row - (needed_h_radius * 2)
+
+    return int(min_row), int(max_row)
+
 def get_mean_and_std(dataset):
     '''Compute the mean and std value of dataset.'''
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)
@@ -772,11 +907,13 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                 if epoch + 1 == epochs:
                     checkpoint = torch.load('./checkpoint/' + current_exp + 'ckpt.pth')
                     net.load_state_dict(checkpoint['net'])
-                    if iteration and trial and dataset and classes:
+                    if iteration is not None and trial is not None and dataset is not None and classes is not None:
                         print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
-                        print(make_prediction(net, classes, testloader), file = f)
+                        targets, preds, _ = make_prediction(net, classes, testloader)
+                        print(classification_report(targets, preds, target_names=classes), file = f)
                         print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
-                        print(make_prediction(net, classes, trainloader), file = f)
+                        targets, preds, _ = make_prediction(net, classes, trainloader)
+                        print(classification_report(targets, preds, target_names=classes), file = f)
 
     return best_acc
 
@@ -844,7 +981,10 @@ def test_model(net, epoch, loader, current_exp, best_acc, criterion, device):
 def mix(cam, images_from_c, images_from_c_hat, image_size, not_sure_dir, threshold_, min_val_, approach):
     if images_from_c and images_from_c_hat:
         for i in range(len(images_from_c_hat)):
+            # print("Length of images_from c_hat: ", len(images_from_c_hat))
             img_1 = images_from_c_hat[i]
+
+            # print("Length of images_from c: ", len(images_from_c))
             img_2 = images_from_c[i]
 
             file_path = not_sure_dir + img_1.split("/")[-1].split(".")[0] + "_" + img_2.split("/")[-1].split(".")[0] + ".jpg"
@@ -852,6 +992,13 @@ def mix(cam, images_from_c, images_from_c_hat, image_size, not_sure_dir, thresho
                 approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
             elif approach == 2:
                 approach_2(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
+            elif approach == 3:
+                approach_3(img_1, img_2, image_size, image_size, file_path)
+            elif approach == 4:
+                approach_4(img_1, img_2, image_size, image_size, file_path, i)
+            elif approach == 5:
+                approach_5(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_, i)
+
             else:
                 approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
                 approach_2(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)

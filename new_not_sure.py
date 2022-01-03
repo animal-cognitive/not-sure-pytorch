@@ -120,8 +120,32 @@ for dataset in dataset_list:
             NS_ALL = args.ns_all # Total number of not-sure images to create
             no_of_classes = len(class_names)
 
+            # Load the train and test loader and set
+            batch_size = args.batch_size
+            trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
+
+            # Run the model for a number of times to choose the best model
+            for iter in range(args.subset_train_iter):
+                # Load the model
+                net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
+
+                # Run the model
+                best_acc = run_experiment(trainloader, testloader, subset_dataset, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
+
             # Construct the GradCAM to use
             cam = construct_cam(net.module, [net.module.layer4[-1]], torch.cuda.is_available())
+
+            # Make prediction on the subset dataset
+            targets_baseline, predictions_baseline, file_paths_baseline = make_prediction(net, class_names, testloader)
+
+            # Store the files for each confusion matrix value
+            file_pred_list_baseline = [[[] for item in range(len(class_names))] for item in range(len(class_names))]
+
+            # Iterate over each target index, for each prediction, get the file path
+            for target_index in range(len(targets_baseline)):
+                target_value = targets_baseline[target_index]
+                predicted_value = predictions_baseline[target_index]
+                file_pred_list_baseline[target_value][predicted_value].append(file_paths_baseline[target_index])
 
             # Create directory to save not-sure images
             create_dir(not_sure_train_dir, True)
@@ -138,10 +162,14 @@ for dataset in dataset_list:
 
                 # Get |NS_c| True positive images from class c.
                 corr_preds_as_c = file_pred_list[c][c]
+                corr_preds_as_c_baseline = file_pred_list_baseline[c][c]
 
                 # Check if number of true positive images is not up to NS_c, then we upsample
-                if corr_preds_as_c and len(corr_preds_as_c) < NS_c:
-                    corr_preds_as_c = corr_preds_as_c * math.ceil(NS_c / len(corr_preds_as_c) + 1)
+                # if corr_preds_as_c and len(corr_preds_as_c) < NS_c:
+                #     corr_preds_as_c = corr_preds_as_c * math.ceil(NS_c / len(corr_preds_as_c) + 1)
+
+                if corr_preds_as_c_baseline and len(corr_preds_as_c_baseline) < NS_c:
+                    corr_preds_as_c_baseline = corr_preds_as_c_baseline * math.ceil(NS_c / len(corr_preds_as_c_baseline) + 1)
 
                 # Compute uniform false positive error UFPE_c for class c
                 UFPE_c  = fp_c  / ( no_of_classes - 1 )
@@ -159,8 +187,9 @@ for dataset in dataset_list:
                     for c_hat in list_c:
 
                         # Get the list of images in class c_hat that were wrongly predicted as class c
-                        wrong_pred_in_c_hat = file_pred_list[c_hat][c]
-                        fp_from_c_hat = len(wrong_pred_in_c_hat)
+                        # wrong_pred_in_c_hat = file_pred_list[c_hat][c]
+                        wrong_pred_in_c_hat = file_pred_list_baseline[c_hat][c_hat]
+                        fp_from_c_hat = len(file_pred_list[c_hat][c])
 
                         # Number of NS images to create from class c_hat
                         NS_c_hat = math.ceil( (fp_from_c_hat / fp_total) * NS_c )
@@ -173,13 +202,17 @@ for dataset in dataset_list:
                         images_from_c_hat = wrong_pred_in_c_hat[:NS_c_hat]
 
                         # Get the list of images from class c and update the list of the remaining images
-                        images_from_c = corr_preds_as_c[:NS_c_hat]
+                        # images_from_c = corr_preds_as_c[:NS_c_hat]
+                        images_from_c = corr_preds_as_c_baseline[:NS_c_hat]
+
+                        # print("SHAPE OF Images c: ", len(images_from_c))
 
                         # Create not-sure images
                         mix(cam, images_from_c, images_from_c_hat, args.image_size, not_sure_train_dir, 0.0, 0.5, args.approach)
 
                         # Use the correct_preds that have not been used for the next class
-                        corr_preds_as_c = corr_preds_as_c[NS_c_hat:]
+                        # corr_preds_as_c = corr_preds_as_c[NS_c_hat:]
+                        corr_preds_as_c_baseline = corr_preds_as_c_baseline[NS_c_hat:]
 
             # To enable proper computation, copy one training not-sure image to test folder
             shutil.copy(glob.glob(not_sure_train_dir + '*')[0], not_sure_test_dir)
@@ -196,3 +229,26 @@ for dataset in dataset_list:
             best_acc = 0  # best test accuracy
 
             run_experiment(trainloader, testloader, current_exp, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr, iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
+
+            # Retrain the current model but without the not-sure class
+            net = net.module
+            net.linear = nn.Linear(net.linear.in_features, len(testset.classes) - 1)
+            net = torch.nn.DataParallel(net)
+            net = net.to(device)
+            # print(net)
+            for name, param in net.named_parameters():
+                if "linear" in name:
+                    # print("LAST: ", name)
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
+
+            # n1, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
+            net, criterion, optimizer, scheduler = load_current_model_and_train_params(net, args.lr, args.use_old)
+            delete_dir_if_exists(not_sure_train_dir)
+            delete_dir_if_exists(not_sure_test_dir)
+
+            # Load the train and test loader and set for the full dataset
+            trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
+
+            run_experiment(trainloader, testloader, current_exp, args.epochs - 150, net, optimizer, scheduler, best_acc, criterion, device, args.lr, iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
