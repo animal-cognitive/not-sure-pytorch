@@ -3,7 +3,7 @@
 
 # from __future__ import print_function
 
-import argparse, csv, os, time
+import argparse, csv, os, time, glob
 
 import numpy as np
 import torch
@@ -40,7 +40,6 @@ parser.add_argument('--use_old', '-use_old', action='store_true', help='Use old 
 parser.add_argument('--approach', default=1, type=int, help='Approach')
 parser.add_argument('--ns_epochs', default=200, type=int, help='ns_epochs')
 parser.add_argument('--subset_train_iter', default=1, type=int, help='Iterations for the subset training model')
-parser.add_argument('--ns_all', default=500, type=int, help='Number of NS images to create')
 
 args = parser.parse_args()
 
@@ -60,6 +59,9 @@ print('==> Preparing data..')
 transform_train, transform_test = get_transforms()
 
 for dataset in dataset_list:
+    # Number of not-sure images to create
+    NS_ALL = int(len(glob.glob(dataset + "/train/*/*")) / len (glob.glob(dataset + "/train/*")))
+
     for iteration in range(args.iterations):
         for trial in range(args.trials):
 
@@ -117,7 +119,6 @@ for dataset in dataset_list:
             conf_matrix = np.array(confusion_matrix(targets, predictions)).T.tolist()
 
             TFP = calculate_total_false_positives(conf_matrix)
-            NS_ALL = args.ns_all # Total number of not-sure images to create
             no_of_classes = len(class_names)
 
             # Construct the GradCAM to use
@@ -179,6 +180,8 @@ for dataset in dataset_list:
                         mix(cam, images_from_c, images_from_c_hat, args.image_size, not_sure_train_dir, 0.0, 0.5, args.approach)
 
                         # Use the correct_preds that have not been used for the next class
+                        if len(corr_preds_as_c) < NS_c_hat:
+                            corr_preds_as_c = corr_preds_as_c * math.ceil(NS_c_hat / len(corr_preds_as_c) )
                         corr_preds_as_c = corr_preds_as_c[NS_c_hat:]
 
             # To enable proper computation, copy one training not-sure image to test folder
