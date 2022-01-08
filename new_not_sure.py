@@ -1,11 +1,9 @@
 # '''Train CIFAR10 with PyTorch.'''
-# not_sure.py --epochs 2 --trials=2 --iterations=2 --dataset_dir=../Datasets
 
-# from __future__ import print_function
-
-import argparse, csv, os, time
+import argparse, csv, os, time, sys
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
@@ -16,7 +14,6 @@ import torchvision.datasets as datasets
 
 import models
 from utils import *
-
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -37,9 +34,9 @@ parser.add_argument('--alpha', default=1., type=float,
                     help='mixup interpolation coefficient (default: 1)')
 parser.add_argument('--image_size', default=32, type=int, help='input image size')
 parser.add_argument('--use_old', '-use_old', action='store_true', help='Use old code base')
-parser.add_argument('--approach', default=1, type=int, help='Approach')
 parser.add_argument('--ns_epochs', default=200, type=int, help='ns_epochs')
 parser.add_argument('--subset_train_iter', default=1, type=int, help='Iterations for the subset training model')
+parser.add_argument('--approach_list', '-app-list', nargs='+', type=int, required=True)
 
 args = parser.parse_args()
 
@@ -58,202 +55,231 @@ dataset_list = check_dataset_dir(args.dataset_dir)
 print('==> Preparing data..')
 transform_train, transform_test = get_transforms()
 
+result_df = pd.DataFrame(columns = ['Approach', 'Dataset', 'Iter', 'Trial',
+'Test_Acc', 'Test, Pre', 'Test_Re', 'Test_F1', 'Train_Acc',
+'Train_Pre', 'Train_Re', 'Train_F1'])
+
 for dataset in dataset_list:
-    # Number of not-sure images to create
+
+    # Initial clean-up - Delete Not-Sure class if already exists
+    not_sure_train_dir = dataset + "/train/Not_Sure/"
+    not_sure_test_dir = dataset + "/test/Not_Sure/"
+    delete_dir_if_exists(not_sure_train_dir)
+    delete_dir_if_exists(not_sure_test_dir)
+
+    # Delete and recreate the folders for each approach
+    for approach in args.approach_list:
+        not_sure_approach_dir = dataset + f"/approach_{approach}/Not_Sure/"
+        create_dir(not_sure_approach_dir, True)
+
+    # Number of not-sure images to create - Average number of images in all class
     NS_ALL = int(len(glob.glob(dataset + "/train/*/*")) / len (glob.glob(dataset + "/train/*")))
+
+    #2. Create the dataset subset
+    ##################################
+    subset_dataset = args.subset_folder
+    create_subset_dataset(subset_dataset)
+
+    #2. Split the dataset training into number_of_splits
+    no_of_splits = 4
+    #
+    splits_per_class, class_names = split_dataset(dataset, no_of_splits)
+    train_data, full_val = collect_train_and_val_data(splits_per_class, 0)
+
+    copy_images_to_subset_dataset(subset_dataset, dataset, train_data, full_val, class_names)
+    #################################
+
+    # Load the train and test loader and set
+    batch_size = args.batch_size
+    trainset, trainloader, testset, testloader = get_loaders_and_dataset(subset_dataset, transform_train, transform_test, args.batch_size)
+
+    # Train the weak model on the subset dataset
+    for iter in range(args.subset_train_iter):
+        # Load the model
+        net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
+
+        # Run the model
+        best_acc, _ = run_experiment(trainloader, testloader, subset_dataset, args.ns_epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
+
+    # Load the best weak model
+    checkpoint = torch.load(f'./checkpoint/{subset_dataset}ckpt.pth')
+    net.load_state_dict(checkpoint['net'])
+
+    current_dataset_file = dataset.split("/")[-1] + '_.txt'
+
+    # Make prediction on the subset dataset
+    targets, predictions, file_paths = make_prediction(net, class_names, testloader)
+
+    # Store the files for each confusion matrix value
+    file_pred_list = [[[] for item in range(len(class_names))] for item in range(len(class_names))]
+
+    # Iterate over each target index, for each prediction, get the file path
+    for target_index in range(len(targets)):
+        target_value = targets[target_index]
+        predicted_value = predictions[target_index]
+        file_pred_list[target_value][predicted_value].append(file_paths[target_index])
+
+    # Create the confusion matrix from the weakly trained model
+    conf_matrix = np.array(confusion_matrix(targets, predictions)).T.tolist()
+
+    TFP = calculate_total_false_positives(conf_matrix)
+    no_of_classes = len(class_names)
+
+    # Load the train and test loader and set
+    batch_size = args.batch_size
+    trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
+
+    for iter in range(args.subset_train_iter):
+        # Load the model
+        net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
+
+        # Run the model
+        best_acc, _ = run_experiment(trainloader, testloader, dataset.split("/")[-1], args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
+
+    # Load the best good model
+    checkpoint = torch.load(f'./checkpoint/{dataset.split("/")[-1]}ckpt.pth')
+    net.load_state_dict(checkpoint['net'])
+
+    # Construct the GradCAM to use
+    cam = construct_cam(net.module, [net.module.layer4[-1]], torch.cuda.is_available())
+
+    # Prediction results from the good baseline model.
+    targets_baseline, predictions_baseline, file_paths_baseline = make_prediction(net, class_names, trainloader)
+
+    # Store the files for each confusion matrix value
+    file_pred_list_baseline = [[[] for item in range(len(class_names))] for item in range(len(class_names))]
+
+    # Iterate over each target index, for each prediction, get the file path
+    for target_index in range(len(targets_baseline)):
+        target_value = targets_baseline[target_index]
+        predicted_value = predictions_baseline[target_index]
+        file_pred_list_baseline[target_value][predicted_value].append(file_paths_baseline[target_index])
+
+    # For each class in the confusion matrix
+    for c in range(no_of_classes):
+
+        # Calculate the false positives only for class class_c
+        fp_c = count_false_positives_for_given_class(conf_matrix[c], c)
+
+        # Calculate the number of NS to create for class_c
+        NS_c = round((fp_c / TFP) *  NS_ALL)
+
+        # Get |NS_c| True positive images from class c.
+        corr_preds_as_c = file_pred_list[c][c]
+        corr_preds_as_c_baseline = file_pred_list_baseline[c][c]
+
+        # If any of the items are empty
+        if not len(corr_preds_as_c_baseline) or not len(corr_preds_as_c):
+            continue
+
+        # To ensure the number of images are always up to NS_c
+        corr_preds_as_c_baseline = corr_preds_as_c_baseline * math.ceil((NS_c / len(corr_preds_as_c_baseline)) + 1)
+
+        # Compute uniform false positive error UFPE_c for class c
+        UFPE_c  = fp_c  / ( no_of_classes - 1 )
+
+        # Get list of classes LIST_c whose number of false positives in class_c is greater than UFPE_c
+        list_c = get_list_of_classes_GT_UFPE(conf_matrix[c], c, UFPE_c)
+
+        # Get the total number of False positives from classes LIST_c as FP_Total
+        fp_total = count_false_positives_within_list(conf_matrix[c], list_c)
+
+        # To avoid division by zero in computing NS_c_hat
+        if fp_total:
+
+            # Iterate over the classes in list_c
+            for c_hat in list_c:
+
+                # Get the list of images in class c_hat that were wrongly predicted as class c
+                wrong_pred_in_c_hat = file_pred_list_baseline[c_hat][c_hat]
+                fp_from_c_hat = len(file_pred_list[c_hat][c])
+
+                # If any of the items are empty
+                if not fp_from_c_hat or not len(wrong_pred_in_c_hat):
+                    continue
+
+                # Number of NS images to create from class c_hat
+                NS_c_hat = math.ceil( (fp_from_c_hat / fp_total) * NS_c )
+
+                # Upsample the list of images
+                wrong_pred_in_c_hat = wrong_pred_in_c_hat * math.ceil((NS_c_hat / fp_from_c_hat) + 1)
+
+                # List of images from class c_hat to use
+                images_from_c_hat = wrong_pred_in_c_hat[:NS_c_hat]
+
+                # Get the list of images from class c and update the list of the remaining images
+                images_from_c = corr_preds_as_c_baseline[:NS_c_hat]
+
+                # Create not-sure images
+                if len(images_from_c_hat) > 0 and len(images_from_c_hat) == len(images_from_c):
+                    mix(cam, images_from_c, images_from_c_hat, args.image_size, dataset, 0.0, 0.5, args.approach_list)
+
+                # Use the correct_preds that have not been used for the next class
+                if len(corr_preds_as_c_baseline) < NS_c_hat:
+                    corr_preds_as_c_baseline = corr_preds_as_c_baseline * math.ceil(NS_c_hat / len(corr_preds_as_c_baseline) )
+
+                if len(corr_preds_as_c_baseline) > 0:
+                    corr_preds_as_c_baseline = corr_preds_as_c_baseline[NS_c_hat:]
 
     for iteration in range(args.iterations):
         for trial in range(args.trials):
 
-            # Initial clean-up - Delete Not-Sure class if already exists
-            not_sure_train_dir = dataset + "/train/Not_Sure/"
-            not_sure_test_dir = dataset + "/test/Not_Sure/"
-            delete_dir_if_exists(not_sure_train_dir)
-            delete_dir_if_exists(not_sure_test_dir)
+            # Test over the Not-sure images created for each approach
+            for approach in args.approach_list:
 
-            #2. Create the dataset subset
-            ##################################
-            subset_dataset = args.subset_folder
-            create_subset_dataset(subset_dataset)
+                # Create directory to save not-sure images inside of the training folder
+                create_dir(not_sure_test_dir, True)
 
-            #2. Split the dataset training into number_of_splits
-            no_of_splits = 4
-            #
-            splits_per_class, class_names = split_dataset(dataset, no_of_splits)
-            train_data, full_val = collect_train_and_val_data(splits_per_class, 0)
+                # Current approach not-sure data
+                app_ns_data = dataset + f"/approach_{approach}/Not_Sure/"
 
-            copy_images_to_subset_dataset(subset_dataset, dataset, train_data, full_val, class_names)
-            #################################
+                # To enable proper computation, copy one training not-sure image to test folder
+                shutil.copy(glob.glob(app_ns_data + '*')[0], not_sure_test_dir)
 
-            # Load the train and test loader and set
-            batch_size = args.batch_size
-            trainset, trainloader, testset, testloader = get_loaders_and_dataset(subset_dataset, transform_train, transform_test, args.batch_size)
+                # Copy the not-sure training data
+                copy_to_other_dir(app_ns_data, not_sure_train_dir)
 
-            # Run the model for a number of times to choose the best model
-            for iter in range(args.subset_train_iter):
+                # Load the train and test loader and set for the full dataset
+                trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
+
+                print(f"Working on approach {approach}, dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
+                current_exp = "_appr_"  + str(approach) + "_ite_" + str(iteration) + "_trial_" + str(trial) + "_dataset_" + dataset.split("/")[-1] + "_"
+
                 # Load the model
                 net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
 
-                # Run the model
-                best_acc = run_experiment(trainloader, testloader, subset_dataset, args.ns_epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
+                best_acc = 0  # best test accuracy
 
-            # Load best model
-            checkpoint = torch.load(f'./checkpoint/{subset_dataset}ckpt.pth')
-            net.load_state_dict(checkpoint['net'])
+                run_experiment(trainloader, testloader, current_exp, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
 
-            current_dataset_file = dataset.split("/")[-1] + '_.txt'
+                # Retrain the current model but without the not-sure class
+                net = net.module
+                net.linear = nn.Linear(net.linear.in_features, len(testset.classes) - 1)
+                net = torch.nn.DataParallel(net)
+                net = net.to(device)
 
-            # Make prediction on the subset dataset
-            targets, predictions, file_paths = make_prediction(net, class_names, testloader)
+                for name, param in net.named_parameters():
+                    if "linear" in name:
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False
 
-            # Store the files for each confusion matrix value
-            file_pred_list = [[[] for item in range(len(class_names))] for item in range(len(class_names))]
+                net, criterion, optimizer, scheduler = load_current_model_and_train_params(net, args.lr, args.use_old)
 
-            # Iterate over each target index, for each prediction, get the file path
-            for target_index in range(len(targets)):
-                target_value = targets[target_index]
-                predicted_value = predictions[target_index]
-                file_pred_list[target_value][predicted_value].append(file_paths[target_index])
+                # Remove the not-sure data
+                delete_dir_if_exists(not_sure_train_dir)
+                delete_dir_if_exists(not_sure_test_dir)
 
-            # Invert confusion matrix for easier processing
-            conf_matrix = np.array(confusion_matrix(targets, predictions)).T.tolist()
+                # Load the train and test loader and set for the full original dataset
+                trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
 
-            TFP = calculate_total_false_positives(conf_matrix)
-            no_of_classes = len(class_names)
+                # run_experiment(trainloader, testloader, current_exp, args.epochs - 150, net, optimizer, scheduler, best_acc, criterion, device, args.lr, iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
+                _, metrics = run_experiment(trainloader, testloader, current_exp, args.epochs // 4, net, optimizer, scheduler, best_acc, criterion, device, args.lr, iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
 
-            # Load the train and test loader and set
-            batch_size = args.batch_size
-            trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
+                # Add the current approach
+                metrics.insert(0, approach)
 
-            # Run the model for a number of times to choose the best model
-            for iter in range(args.subset_train_iter):
-                # Load the model
-                net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
+                result_df.loc[len(result_df.index)] = metrics
+                result_df.to_csv(args.subset_folder + '.csv')
 
-                # Run the model
-                best_acc = run_experiment(trainloader, testloader, subset_dataset, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
-
-            # Construct the GradCAM to use
-            cam = construct_cam(net.module, [net.module.layer4[-1]], torch.cuda.is_available())
-
-            # Make prediction on the subset dataset
-            targets_baseline, predictions_baseline, file_paths_baseline = make_prediction(net, class_names, testloader)
-
-            # Store the files for each confusion matrix value
-            file_pred_list_baseline = [[[] for item in range(len(class_names))] for item in range(len(class_names))]
-
-            # Iterate over each target index, for each prediction, get the file path
-            for target_index in range(len(targets_baseline)):
-                target_value = targets_baseline[target_index]
-                predicted_value = predictions_baseline[target_index]
-                file_pred_list_baseline[target_value][predicted_value].append(file_paths_baseline[target_index])
-
-            # Create directory to save not-sure images
-            create_dir(not_sure_train_dir, True)
-            create_dir(not_sure_test_dir, True)
-
-            # For each class in the confusion matrix
-            for c in range(no_of_classes):
-
-                # Calculate the false positives only for class class_c
-                fp_c = count_false_positives_for_given_class(conf_matrix[c], c)
-
-                # Calculate the number of NS to create for class_c
-                NS_c = round((fp_c / TFP) *  NS_ALL)
-
-                # Get |NS_c| True positive images from class c.
-                corr_preds_as_c = file_pred_list[c][c]
-                corr_preds_as_c_baseline = file_pred_list_baseline[c][c]
-
-                # Check if number of true positive images is not up to NS_c, then we upsample
-                # if corr_preds_as_c and len(corr_preds_as_c) < NS_c:
-                #     corr_preds_as_c = corr_preds_as_c * math.ceil(NS_c / len(corr_preds_as_c) + 1)
-
-                if corr_preds_as_c_baseline and len(corr_preds_as_c_baseline) < NS_c:
-                    corr_preds_as_c_baseline = corr_preds_as_c_baseline * math.ceil(NS_c / len(corr_preds_as_c_baseline) + 1)
-
-                # Compute uniform false positive error UFPE_c for class c
-                UFPE_c  = fp_c  / ( no_of_classes - 1 )
-
-                # Get list of classes LIST_c whose number of false positives in class_c is greater than UFPE_c
-                list_c = get_list_of_classes_GT_UFPE(conf_matrix[c], c, UFPE_c)
-
-                # Get the total number of False positives from classes LIST_c as FP_Total
-                fp_total = count_false_positives_within_list(conf_matrix[c], list_c)
-
-                # To avoid division by zero in computing NS_c_hat
-                if fp_total:
-
-                    # Iterate over the classes in list_c
-                    for c_hat in list_c:
-
-                        # Get the list of images in class c_hat that were wrongly predicted as class c
-                        # wrong_pred_in_c_hat = file_pred_list[c_hat][c]
-                        wrong_pred_in_c_hat = file_pred_list_baseline[c_hat][c_hat]
-                        fp_from_c_hat = len(file_pred_list[c_hat][c])
-
-                        # Number of NS images to create from class c_hat
-                        NS_c_hat = math.ceil( (fp_from_c_hat / fp_total) * NS_c )
-
-                        # Upsample the list of images if not sufficient
-                        if wrong_pred_in_c_hat and fp_from_c_hat < NS_c_hat:
-                            wrong_pred_in_c_hat = wrong_pred_in_c_hat * math.ceil(NS_c_hat / fp_from_c_hat + 1)
-
-                        # List of images from class c_hat to use
-                        images_from_c_hat = wrong_pred_in_c_hat[:NS_c_hat]
-
-                        # Get the list of images from class c and update the list of the remaining images
-                        # images_from_c = corr_preds_as_c[:NS_c_hat]
-                        images_from_c = corr_preds_as_c_baseline[:NS_c_hat]
-
-                        # print("SHAPE OF Images c: ", len(images_from_c))
-
-                        # Create not-sure images
-                        mix(cam, images_from_c, images_from_c_hat, args.image_size, not_sure_train_dir, 0.0, 0.5, args.approach)
-
-                        # Use the correct_preds that have not been used for the next class
-                        # corr_preds_as_c = corr_preds_as_c[NS_c_hat:]
-                        # Use the correct_preds that have not been used for the next class
-                        if len(corr_preds_as_c_baseline) < NS_c_hat:
-                            corr_preds_as_c_baseline = corr_preds_as_c_baseline * math.ceil(NS_c_hat / len(corr_preds_as_c_baseline) )
-                        corr_preds_as_c_baseline = corr_preds_as_c_baseline[NS_c_hat:]
-
-
-            # To enable proper computation, copy one training not-sure image to test folder
-            shutil.copy(glob.glob(not_sure_train_dir + '*')[0], not_sure_test_dir)
-
-            # Load the train and test loader and set for the full dataset
-            trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
-
-            print("Working on dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
-            current_exp = "_ite_" + str(iteration) + "_trial_" + str(trial) + "_dataset_" + dataset.split("/")[-1] + "_"
-
-            # Load the model
-            net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
-
-            best_acc = 0  # best test accuracy
-
-            run_experiment(trainloader, testloader, current_exp, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr, iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
-
-            # Retrain the current model but without the not-sure class
-            net = net.module
-            net.linear = nn.Linear(net.linear.in_features, len(testset.classes) - 1)
-            net = torch.nn.DataParallel(net)
-            net = net.to(device)
-            # print(net)
-            for name, param in net.named_parameters():
-                if "linear" in name:
-                    # print("LAST: ", name)
-                    param.requires_grad = True
-                else:
-                    param.requires_grad = False
-
-            # n1, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
-            net, criterion, optimizer, scheduler = load_current_model_and_train_params(net, args.lr, args.use_old)
-            delete_dir_if_exists(not_sure_train_dir)
-            delete_dir_if_exists(not_sure_test_dir)
-
-            # Load the train and test loader and set for the full dataset
-            trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
-
-            run_experiment(trainloader, testloader, current_exp, args.epochs - 150, net, optimizer, scheduler, best_acc, criterion, device, args.lr, iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
+result_df.to_csv(args.subset_folder + '.csv')

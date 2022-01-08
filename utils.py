@@ -28,9 +28,11 @@ class ImageFolderWithPaths(datasets.ImageFolder):
     def __getitem__(self, index):
         return super(ImageFolderWithPaths, self).__getitem__(index) + (self.imgs[index][0],)
 
-def get_transforms():
+def get_transforms(img_size = None):
+    if not img_size:
+        img_size = 32
     transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
+        transforms.RandomCrop(img_size, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
@@ -123,7 +125,7 @@ def load_model_and_train_params(image_size, device, lr, testset, old):
 
     weight_decay = 1e-4
     print('==> Building model..')
-    if image_size == 32:
+    if image_size == 32 or image_size == 224:
         if old:
             net = models.__dict__['ResNet18'](num_classes=len(testset.classes))
             # net = models_old.ResNet18(num_classes=len(testset.classes))
@@ -132,10 +134,11 @@ def load_model_and_train_params(image_size, device, lr, testset, old):
             net = models_new.ResNet18(num_classes=len(testset.classes))
 
         net = net.to(device)
-        ### Update the number of classes to predict
-        num_ftrs = net.linear.in_features
-        # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
-        net.linear = nn.Linear(num_ftrs, len(testset.classes))
+        if image_size == 32:
+            ### Update the number of classes to predict
+            num_ftrs = net.linear.in_features
+            # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
+            net.linear = nn.Linear(num_ftrs, len(testset.classes))
     else:
         net = models.densenet161()
         net.classifier = nn.Linear(net.classifier.in_features, len(testset.classes))
@@ -893,14 +896,11 @@ def adjust_learning_rate(lr, optimizer, epoch):
         param_group['lr'] = lr
 
 def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer, scheduler, best_acc, criterion, device, learning_rate, iteration = None, trial = None, dataset = None, classes = None, current_dataset_file = None):
-    for epoch in range(epochs):
-        train_model(net, epoch, trainloader, optimizer, criterion, device)
-        best_acc = test_model(net, epoch, testloader, current_exp, best_acc, criterion, device)
 
-        if scheduler:
-            scheduler.step()
-        else:
-            adjust_learning_rate(learning_rate, optimizer, epoch)
+    metrics = []
+    for epoch in range(epochs):
+        train_model(net, epoch, trainloader, optimizer, criterion, device, scheduler, learning_rate)
+        best_acc = test_model(net, epoch, testloader, current_exp, best_acc, criterion, device)
 
         if current_dataset_file:
             with open(current_dataset_file, 'a') as f:
@@ -908,18 +908,26 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                     checkpoint = torch.load('./checkpoint/' + current_exp + 'ckpt.pth')
                     net.load_state_dict(checkpoint['net'])
                     if iteration is not None and trial is not None and dataset is not None and classes is not None:
+                        metrics = [dataset, trial, iteration]
                         print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
                         targets, preds, _ = make_prediction(net, classes, testloader)
-                        print(classification_report(targets, preds, target_names=classes), file = f)
+                        test_class_report = classification_report(targets, preds, target_names=classes)
+                        test_metrics = get_metrics_from_classi_report(test_class_report)
+                        metrics.extend(test_metrics)
+                        print(test_class_report, file = f)
                         print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
                         targets, preds, _ = make_prediction(net, classes, trainloader)
-                        print(classification_report(targets, preds, target_names=classes), file = f)
+                        train_class_report = classification_report(targets, preds, target_names=classes)
+                        train_metrics = get_metrics_from_classi_report(train_class_report)
+                        metrics.extend(train_metrics)
+                        print(train_class_report, file = f)
 
-    return best_acc
+    return best_acc, metrics
 
 # Training
-def train_model(net, epoch, loader, optimizer, criterion, device):
+def train_model(net, epoch, loader, optimizer, criterion, device, scheduler, learning_rate):
     print('\nEpoch: %d' % epoch)
+    # net.to(device)
     net.train()
     train_loss = 0
     correct = 0
@@ -932,6 +940,11 @@ def train_model(net, epoch, loader, optimizer, criterion, device):
         loss = criterion(outputs, targets)
         loss.backward()
         optimizer.step()
+
+        if scheduler:
+            scheduler.step()
+        else:
+            adjust_learning_rate(learning_rate, optimizer, epoch)
 
         train_loss += loss.data.item()
         _, predicted = outputs.max(1)
@@ -978,27 +991,42 @@ def test_model(net, epoch, loader, current_exp, best_acc, criterion, device):
 
     return best_acc
 
-def mix(cam, images_from_c, images_from_c_hat, image_size, not_sure_dir, threshold_, min_val_, approach):
+def get_metrics_from_classi_report(classification_report):
+    """
+    Get accuracy, precision, recall and F1 scores from classification report
+    """
+
+    metrics_rows = classification_report.split("\n")[-4:-1]
+
+    accuracy = [i for i in metrics_rows[0].split(" ") if i][1]
+    accuracy = float(accuracy)
+
+    y = [i for i in metrics_rows[1].split(" ") if i]
+
+    precision, recall, f1_score = float(y[2]), float(y[3]), float(y[4])
+
+    return accuracy, precision, recall, f1_score
+
+def mix(cam, images_from_c, images_from_c_hat, image_size, dataset_dir, threshold_, min_val_, approach_list):
     if images_from_c and images_from_c_hat:
         for i in range(len(images_from_c_hat)):
-            # print("Length of images_from c_hat: ", len(images_from_c_hat))
             img_1 = images_from_c_hat[i]
 
-            # print("Length of images_from c: ", len(images_from_c))
             img_2 = images_from_c[i]
 
-            file_path = not_sure_dir + img_1.split("/")[-1].split(".")[0] + "_" + img_2.split("/")[-1].split(".")[0] + ".jpg"
-            if approach == 1:
-                approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
-            elif approach == 2:
-                approach_2(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
-            elif approach == 3:
-                approach_3(img_1, img_2, image_size, image_size, file_path)
-            elif approach == 4:
-                approach_4(img_1, img_2, image_size, image_size, file_path, i)
-            elif approach == 5:
-                approach_5(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_, i)
+            for approach in approach_list:
+                file_path = dataset_dir + f"/approach_{approach}/Not_Sure/" + img_1.split("/")[-1].split(".")[0] + "_" + img_2.split("/")[-1].split(".")[0] + ".jpg"
+                if approach == 1:
+                    approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
+                elif approach == 2:
+                    approach_2(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
+                elif approach == 3:
+                    approach_3(img_1, img_2, image_size, image_size, file_path)
+                elif approach == 4:
+                    approach_4(img_1, img_2, image_size, image_size, file_path, i)
+                elif approach == 5:
+                    approach_5(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_, i)
 
-            else:
-                approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
-                approach_2(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
+                else:
+                    approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
+                    approach_2(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
