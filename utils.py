@@ -13,9 +13,10 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 import torch.nn.init as init
 import models_new as models_new
-import models_old as models_old
 import models
 from torchvision.utils import save_image as torch_save_image
+from skimage import io
+import cv2 as cv
 
 
 import numpy as np
@@ -27,6 +28,26 @@ from pytorch_grad_cam.utils.image import preprocess_image, show_cam_on_image
 class ImageFolderWithPaths(datasets.ImageFolder):
     def __getitem__(self, index):
         return super(ImageFolderWithPaths, self).__getitem__(index) + (self.imgs[index][0],)
+
+# Load Dataset loader from file list
+class CustomDataSet(torch.utils.data.Dataset):
+    def __init__(self, imagelist, labels, transform):
+        self.imagepaths = imagelist
+        self.transform = transform
+        self.labels = torch.tensor(labels)
+
+    def __len__(self):
+        return len(self.imagepaths)
+
+    def __getitem__(self, index):
+        self.imagepath = self.imagepaths[index]
+        self.image = Image.open(self.imagepath)
+        self.label = self.labels[index]
+        self.i = self.transform(self.image)
+
+        return (self.i, self.label.item(), self.imagepath)
+
+
 
 def get_transforms(img_size = None):
     if not img_size:
@@ -47,6 +68,26 @@ def get_transforms(img_size = None):
 
 def rand(max):
     return random.randint(0,max - 1)
+
+def predict_given_images(net, transform, files):
+    predictions = []
+    for file in files:
+        inp = transform(Image.open(file)).unsqueeze(0)
+        inp = net(inp)
+        pred_class = np.argmax(inp.cpu().detach().numpy(), axis = -1).item()
+        predictions.append(pred_class)
+
+    return predictions
+
+def get_predicted_files(targets, preds, file_paths, class_names):
+    file_pred_list = [[[] for item in range(len(class_names))] for item in range(len(class_names))]
+
+    for target_index in range(len(targets)):
+        target_value = targets[target_index]
+        predicted_value = preds[target_index]
+        file_pred_list[target_value][predicted_value].append(file_paths[target_index])
+
+    return file_pred_list
 
 # Methods to help with creating directories
 
@@ -128,7 +169,6 @@ def load_model_and_train_params(image_size, device, lr, testset, old):
     if image_size == 32 or image_size == 224:
         if old:
             net = models.__dict__['ResNet18'](num_classes=len(testset.classes))
-            # net = models_old.ResNet18(num_classes=len(testset.classes))
         else:
             weight_decay = 5e-4
             net = models_new.ResNet18(num_classes=len(testset.classes))
@@ -189,6 +229,20 @@ def count_false_positives_for_given_class(class_list, class_c):
 
     # Return the false positive count
     return false_positive_count
+
+def get_false_positives_for_given_class(class_lists, class_c):
+    """
+    Get the False positives for the given class
+    """
+
+    false_positives = []
+
+    for item in range(len(class_lists)):
+        if item != class_c:
+            false_positives.extend(class_lists[item])
+
+    # Return the false positive count
+    return false_positives
 
 def check_dataset_dir(dataset_dir):
     """
@@ -260,16 +314,16 @@ def count_false_positives_within_list(class_predictions, LIST_c):
     # Return the false positive count
     return false_positive_count
 
-def make_prediction(net, class_names, loader):
+def make_prediction(net, thisLoader):
 
     all_preds = torch.tensor([]).cuda()
     ground_truths = torch.tensor([]).cuda()
     net.eval()
     final_paths = [] # List for the file names tested
 
-    for batch_idx, data in enumerate(loader):
+    for batch_idx, data in enumerate(thisLoader):
 
-        inputs, targets,paths = data # Based on ImageFolderWithPaths
+        inputs, targets, paths = data # Based on ImageFolderWithPaths
         final_paths.extend(paths) # Add to paths
 
         if torch.cuda.is_available():
@@ -402,7 +456,7 @@ def construct_cam(model, target_layers, use_cuda):
 
     return cam
 
-def visualize_image(cam, rgb_img, target_category):
+def visualize_image(cam, rgb_img, target_category, transform):
     """
     Visualize output for given image
     """
@@ -412,8 +466,8 @@ def visualize_image(cam, rgb_img, target_category):
     grayscale_cam = cam(input_tensor=input_tensor, target_category=target_category)
     grayscale_cam = grayscale_cam[0, :]
 
-    output = cam.activations_and_grads(input_tensor)
-    softmax = torch.nn.Softmax(dim = 1)
+    if torch.cuda.is_available():
+        input_tensor = input_tensor.cuda()
 
     visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
 
@@ -429,6 +483,29 @@ def normalize_img_to_rgb(img_1_, img_h_, img_w_):
 
     return rgb_img_1
 
+def load_trained_res18_model(pretrained_model_path, class_names, device, image_size = 32, old=True):
+    if old:
+        net = models.__dict__['ResNet18'](num_classes=len(class_names))
+    else:
+        weight_decay = 5e-4
+        net = models_new.ResNet18(num_classes=len(class_names))
+
+    net = net.to(device)
+    if image_size == 32:
+        ### Update the number of classes to predict
+        num_ftrs = net.linear.in_features
+        # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
+        net.linear = nn.Linear(num_ftrs, len(class_names))
+
+    net = torch.nn.DataParallel(net)
+
+    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
+    checkpoint = torch.load(pretrained_model_path, map_location=torch.device('cpu'))
+
+    net.load_state_dict(checkpoint['net'])
+
+    return net
+
 def load_self_pretrained_model(pretrained_model_path = './checkpoint/_ite_0_trial_0_dataset_10%_cifar10_2_classes_ckpt.pth', no_of_classes = 2):
     net = ResNet18(num_classes=no_of_classes)
     net = torch.nn.DataParallel(net)
@@ -443,7 +520,7 @@ def load_self_pretrained_model(pretrained_model_path = './checkpoint/_ite_0_tria
 def load_self_pretrained_model_v2(net, pretrained_model_path = './checkpoint/_ite_0_trial_0_dataset_10%_cifar10_2_classes_ckpt.pth'):
 
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load(pretrained_model_path, map_location=torch.device('cpu'))
+    checkpoint = torch.load(pretrained_model_path, map_location=torch.device('cuda'))
 
     net.load_state_dict(checkpoint['net'])
 
@@ -461,7 +538,9 @@ def save_image(image_patch, image_name='Test_image.jpg'):
     """
     Save the given image
     """
-    img = Image.fromarray(np.uint8(image_patch * 255)).convert('RGB')
+    imageRGB = cv.cvtColor(np.uint8(image_patch * 255), cv.COLOR_RGB2BGR)
+
+    img = Image.fromarray(imageRGB)
     img.save(image_name)
 
 
@@ -910,13 +989,13 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                     if iteration is not None and trial is not None and dataset is not None and classes is not None:
                         metrics = [dataset, trial, iteration]
                         print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
-                        targets, preds, _ = make_prediction(net, classes, testloader)
+                        targets, preds, _ = make_prediction(net, testloader)
                         test_class_report = classification_report(targets, preds, target_names=classes)
                         test_metrics = get_metrics_from_classi_report(test_class_report)
                         metrics.extend(test_metrics)
                         print(test_class_report, file = f)
                         print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
-                        targets, preds, _ = make_prediction(net, classes, trainloader)
+                        targets, preds, _ = make_prediction(net, trainloader)
                         train_class_report = classification_report(targets, preds, target_names=classes)
                         train_metrics = get_metrics_from_classi_report(train_class_report)
                         metrics.extend(train_metrics)
