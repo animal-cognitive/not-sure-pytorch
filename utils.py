@@ -551,7 +551,7 @@ def get_image_patch(cam, rgb_img, target_category=None, threshold=0.5):
     input_tensor = preprocess_image(rgb_img)
 
     # You can also pass aug_smooth=True and eigen_smooth=True, to apply smoothing.
-    grayscale_cam = cam(input_tensor=input_tensor, target_category=target_category)
+    grayscale_cam = cam(input_tensor=input_tensor)
     grayscale_cam = grayscale_cam[0, :]
 
     # Normalize
