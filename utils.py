@@ -14,6 +14,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn.init as init
 import models_new as models_new
 import models
+import torchvision.models as trained_models
 from torchvision.utils import save_image as torch_save_image
 from skimage import io
 import cv2 as cv
@@ -166,7 +167,7 @@ def load_model_and_train_params(image_size, device, lr, testset, old):
 
     weight_decay = 1e-4
     print('==> Building model..')
-    if image_size == 32 or image_size == 224:
+    if image_size == 32:
         if old:
             net = models.__dict__['ResNet18'](num_classes=len(testset.classes))
         else:
@@ -180,8 +181,8 @@ def load_model_and_train_params(image_size, device, lr, testset, old):
             # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
             net.linear = nn.Linear(num_ftrs, len(testset.classes))
     else:
-        net = models.densenet161()
-        net.classifier = nn.Linear(net.classifier.in_features, len(testset.classes))
+        net = trained_models.resnet18(pretrained = True)
+        net.fc = nn.Linear(net.fc.in_features, len(testset.classes))
 
     if device == 'cuda':
         net.cuda()

@@ -14,7 +14,7 @@ import torchvision.datasets as datasets
 
 import models
 from utils import *
-import config as args
+import config_ns as args
 
 use_cuda = torch.cuda.is_available()
 
@@ -29,7 +29,7 @@ dataset_list = check_dataset_dir(args.dataset_dir)
 
 # Data
 print('==> Preparing data..')
-transform_train, transform_test = get_transforms()
+transform_train, transform_test = get_transforms(args.image_size)
 
 result_df = pd.DataFrame(columns = ['Approach', 'Dataset', 'Iter', 'Trial',
 'Test_Acc', 'Test, Pre', 'Test_Re', 'Test_F1', 'Train_Acc',
@@ -230,12 +230,19 @@ for dataset in dataset_list:
 
                 # Retrain the current model but without the not-sure class
                 net = net.module
-                net.linear = nn.Linear(net.linear.in_features, len(testset.classes) - 1)
+                froozen_layer = ""
+                if args.image_size == 32:
+                    froozen_layer = "linear"
+                    net.linear = nn.Linear(net.linear.in_features, len(testset.classes) - 1)
+                else:
+                    froozen_layer = "fc"
+                    net.fc = nn.Linear(net.fc.in_features, len(testset.classes) - 1)
+
                 net = torch.nn.DataParallel(net)
                 net = net.to(device)
 
                 for name, param in net.named_parameters():
-                    if "linear" in name:
+                    if froozen_layer in name:
                         param.requires_grad = True
                     else:
                         param.requires_grad = False
