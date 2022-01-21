@@ -26,6 +26,51 @@ from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import preprocess_image, show_cam_on_image
 from torch.autograd import Variable
 
+import torch
+import numpy as np
+
+
+class Cutout(object):
+    """Randomly mask out one or more patches from an image.
+
+    Args:
+        n_holes (int): Number of patches to cut out of each image.
+        length (int): The length (in pixels) of each square patch.
+    """
+    def __init__(self, n_holes, length):
+        self.n_holes = n_holes
+        self.length = length
+
+    def __call__(self, img):
+        """
+        Args:
+            img (Tensor): Tensor image of size (C, H, W).
+        Returns:
+            Tensor: Image with n_holes of dimension length x length cut out of it.
+        """
+        h = img.size(1)
+        w = img.size(2)
+
+        mask = np.ones((h, w), np.float32)
+
+        for n in range(self.n_holes):
+            y = np.random.randint(h)
+            x = np.random.randint(w)
+
+            y1 = np.clip(y - self.length // 2, 0, h)
+            y2 = np.clip(y + self.length // 2, 0, h)
+            x1 = np.clip(x - self.length // 2, 0, w)
+            x2 = np.clip(x + self.length // 2, 0, w)
+
+            mask[y1: y2, x1: x2] = 0.
+
+        mask = torch.from_numpy(mask)
+        mask = mask.expand_as(img)
+        img = img * mask
+
+        return img
+
+
 # Allow to get the file paths of the loaded images
 class ImageFolderWithPaths(datasets.ImageFolder):
     def __getitem__(self, index):
@@ -163,7 +208,7 @@ def get_loaders_and_dataset(dataset, transform_train, transform_test, batch_size
 
     return trainset, trainloader, testset, testloader
 
-def load_model_and_train_params(image_size, device, lr, testset, old):
+def load_model_and_train_params(image_size, device, lr, testset, old, cut_out = False):
     # Model
 
     weight_decay = 1e-4
@@ -199,9 +244,14 @@ def load_model_and_train_params(image_size, device, lr, testset, old):
     else:
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
 
+
+    if cut_out:
+        optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=5e-4)
+        scheduler = MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)
+
     return net, criterion, optimizer, scheduler
 
-def load_current_model_and_train_params(net, lr, old):
+def load_current_model_and_train_params(net, lr, old, cut_out = False):
     # Model
 
     weight_decay = 1e-4
@@ -215,6 +265,10 @@ def load_current_model_and_train_params(net, lr, old):
         scheduler = None
     else:
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+
+    if cut_out:
+        optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=5e-4)
+        scheduler = MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)
 
     return net, criterion, optimizer, scheduler
 
@@ -976,6 +1030,13 @@ def adjust_learning_rate(lr, optimizer, epoch):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
+def adjust_learning_rate_for_cutmix(learning_rate, optimizer, epoch, epochs):
+    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
+    lr = learning_rate * (0.1 ** (epoch // (epochs * 0.5))) * (0.1 ** (epoch // (epochs * 0.75)))
+
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
 def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer, scheduler, best_acc, criterion, device, learning_rate, iteration = None, trial = None, dataset = None, classes = None, current_dataset_file = None):
 
     metrics = []
@@ -1155,6 +1216,83 @@ def train_mixup_approach(net, epoch, trainloader, criterion, optimizer, device, 
                      % (train_loss/(batch_idx+1), reg_loss/(batch_idx+1),
                         100.*correct/total, correct, total))
     return (train_loss/batch_idx, reg_loss/batch_idx, 100.*correct/total)
+
+def run_experiment_cutmix_approach(trainloader, testloader, current_exp, epochs, net, optimizer, scheduler, best_acc, criterion, device, learning_rate, beta, cutmix_prob, iteration = None, trial = None, dataset = None, classes = None, current_dataset_file = None):
+
+    metrics = []
+    for epoch in range(epochs):
+        train_cutmix_approach(net, epoch, trainloader, criterion, optimizer, device, beta, cutmix_prob, lam)
+        best_acc = test_model(net, epoch, testloader, criterion, best_acc, device, current_exp)
+        adjust_learning_rate_for_cutmix(learning_rate, optimizer, epoch, epochs)
+
+    if current_dataset_file:
+        metrics = process_result(net, trainloader, testloader, classes, current_dataset_file, epoch, epochs, current_exp, dataset, trial, iteration, metrics)
+
+    return best_acc, metrics
+
+def train_cutmix_approach(net, epoch, trainloader, criterion, optimizer, device, beta, cutmix_prob):
+    print('\nEpoch: %d' % epoch)
+    net.train()
+    train_loss = 0
+    reg_loss = 0
+    correct = 0
+    total = 0
+    for batch_idx, data in enumerate(trainloader):
+        inputs, targets, file_paths = data
+        inputs, targets = inputs.to(device), targets.to(device)
+
+        r = np.random.rand(1)
+        if beta > 0 and r < cutmix_prob:
+            # generate mixed sample
+            lam = np.random.beta(beta, beta)
+            rand_index = torch.randperm(input.size()[0]).cuda()
+            target_a = targets
+            target_b = targets[rand_index]
+            bbx1, bby1, bbx2, bby2 = rand_bbox(input.size(), lam)
+            input[:, :, bbx1:bbx2, bby1:bby2] = input[rand_index, :, bbx1:bbx2, bby1:bby2]
+            # adjust lambda to exactly match pixel ratio
+            lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (input.size()[-1] * input.size()[-2]))
+            # compute output
+            output = net(input)
+            loss = criterion(output, target_a) * lam + criterion(output, target_b) * (1. - lam)
+        else:
+            # compute output
+            output = net(input)
+            loss = criterion(output, targets)
+
+        train_loss += loss.item()
+        _, predicted = torch.max(outputs.data, 1)
+        total += targets.size(0)
+        correct += (lam * predicted.eq(targets_a.data).cpu().sum().float()
+                    + (1 - lam) * predicted.eq(targets_b.data).cpu().sum().float())
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        progress_bar(batch_idx, len(trainloader),
+                     'Loss: %.3f | Reg: %.5f | Acc: %.3f%% (%d/%d)'
+                     % (train_loss/(batch_idx+1), reg_loss/(batch_idx+1),
+                        100.*correct/total, correct, total))
+    return (train_loss/batch_idx, reg_loss/batch_idx, 100.*correct/total)
+
+def rand_bbox(size, lam):
+    W = size[2]
+    H = size[3]
+    cut_rat = np.sqrt(1. - lam)
+    cut_w = np.int(W * cut_rat)
+    cut_h = np.int(H * cut_rat)
+
+    # uniform
+    cx = np.random.randint(W)
+    cy = np.random.randint(H)
+
+    bbx1 = np.clip(cx - cut_w // 2, 0, W)
+    bby1 = np.clip(cy - cut_h // 2, 0, H)
+    bbx2 = np.clip(cx + cut_w // 2, 0, W)
+    bby2 = np.clip(cy + cut_h // 2, 0, H)
+
+    return bbx1, bby1, bbx2, bby2
 
 def test_mixup_approach(net, epoch, testloader, criterion, best_acc, device, current_exp):
     net.eval()
