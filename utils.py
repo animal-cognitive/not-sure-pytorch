@@ -247,7 +247,7 @@ def load_model_and_train_params(image_size, device, lr, testset, old, cut_out = 
 
     if cut_out:
         optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=5e-4)
-        scheduler = MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)
 
     return net, criterion, optimizer, scheduler
 
@@ -268,7 +268,7 @@ def load_current_model_and_train_params(net, lr, old, cut_out = False):
 
     if cut_out:
         optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=5e-4)
-        scheduler = MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)
 
     return net, criterion, optimizer, scheduler
 
@@ -1221,8 +1221,9 @@ def run_experiment_cutmix_approach(trainloader, testloader, current_exp, epochs,
 
     metrics = []
     for epoch in range(epochs):
-        train_cutmix_approach(net, epoch, trainloader, criterion, optimizer, device, beta, cutmix_prob, lam)
-        best_acc = test_model(net, epoch, testloader, criterion, best_acc, device, current_exp)
+        train_cutmix_approach(net, epoch, trainloader, criterion, optimizer, device, beta, cutmix_prob)
+
+        best_acc = test_model(net, epoch, testloader, current_exp, best_acc, criterion, device)
         adjust_learning_rate_for_cutmix(learning_rate, optimizer, epoch, epochs)
 
     if current_dataset_file:
@@ -1237,6 +1238,7 @@ def train_cutmix_approach(net, epoch, trainloader, criterion, optimizer, device,
     reg_loss = 0
     correct = 0
     total = 0
+    lam = 0
     for batch_idx, data in enumerate(trainloader):
         inputs, targets, file_paths = data
         inputs, targets = inputs.to(device), targets.to(device)
@@ -1245,26 +1247,25 @@ def train_cutmix_approach(net, epoch, trainloader, criterion, optimizer, device,
         if beta > 0 and r < cutmix_prob:
             # generate mixed sample
             lam = np.random.beta(beta, beta)
-            rand_index = torch.randperm(input.size()[0]).cuda()
+            rand_index = torch.randperm(inputs.size()[0]).cuda()
             target_a = targets
             target_b = targets[rand_index]
-            bbx1, bby1, bbx2, bby2 = rand_bbox(input.size(), lam)
-            input[:, :, bbx1:bbx2, bby1:bby2] = input[rand_index, :, bbx1:bbx2, bby1:bby2]
+            bbx1, bby1, bbx2, bby2 = rand_bbox(inputs.size(), lam)
+            inputs[:, :, bbx1:bbx2, bby1:bby2] = inputs[rand_index, :, bbx1:bbx2, bby1:bby2]
             # adjust lambda to exactly match pixel ratio
-            lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (input.size()[-1] * input.size()[-2]))
+            lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (inputs.size()[-1] * inputs.size()[-2]))
             # compute output
-            output = net(input)
-            loss = criterion(output, target_a) * lam + criterion(output, target_b) * (1. - lam)
+            outputs = net(inputs)
+            loss = criterion(outputs, target_a) * lam + criterion(outputs, target_b) * (1. - lam)
         else:
             # compute output
-            output = net(input)
-            loss = criterion(output, targets)
+            outputs = net(inputs)
+            loss = criterion(outputs, targets)
 
         train_loss += loss.item()
         _, predicted = torch.max(outputs.data, 1)
         total += targets.size(0)
-        correct += (lam * predicted.eq(targets_a.data).cpu().sum().float()
-                    + (1 - lam) * predicted.eq(targets_b.data).cpu().sum().float())
+        correct += predicted.eq(targets.data).cpu().sum()
 
         optimizer.zero_grad()
         loss.backward()

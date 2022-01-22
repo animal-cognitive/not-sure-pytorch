@@ -1,7 +1,7 @@
 lr = 0.1 #type=float, help='learning rate')
 resume = False # help='resume from checkpoint')
 model = "ResNet18" #type=str, help='model type (default: ResNet18)')
-dataset_dir = '../KV_v1' # type=str, help='The location of the dataset to be explored')
+dataset_dir = '../Kvasir - Aziz_224' # type=str, help='The location of the dataset to be explored')
 #dataset_dir = '../DS'
 subset_folder = 'SUBSET_FOLDER' # type=str, help='Temporary location for dataset')
 trials = 2 # type=int, help='Number of times to run the complete experiment')
@@ -19,7 +19,7 @@ use_old = True # help='Use old code base')
 ns_epochs = 200 # type=int, help='ns_epochs')
 subset_train_iter = 1 # type=int, help='Iterations for the subset training model')
 #approach_list = [3, 4, 5] # Approaches to try
-approach_list = [2]
+approach_list = [2, 3]
 
 # Cut-out config
 n_holes = 1 #help='number of holes to cut out from image')
