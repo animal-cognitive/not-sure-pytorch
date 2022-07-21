@@ -31,6 +31,8 @@ dataset_list = check_dataset_dir(args.dataset_dir)
 # Data
 print('==> Preparing data..')
 transform_train, transform_test = get_transforms(args.image_size)
+# Remove default augmentation
+# transform_train = transform_test
 
 result_df = pd.DataFrame(columns = ['Dataset', 'Iter', 'Trial',
 'Test_Acc', 'Test, Pre', 'Test_Re', 'Test_F1', 'Train_Acc',

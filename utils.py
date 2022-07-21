@@ -96,15 +96,23 @@ class CustomDataSet(torch.utils.data.Dataset):
 
 
 
-def get_transforms(img_size = None):
+def get_transforms(img_size = None, rand_aug = False):
     if not img_size:
         img_size = 32
-    transform_train = transforms.Compose([
-        transforms.RandomCrop(img_size, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ])
+
+    if rand_aug:
+        transform_train = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+
+    else:
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(img_size, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
 
     transform_test = transforms.Compose([
         transforms.ToTensor(),

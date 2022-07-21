@@ -216,6 +216,8 @@ for dataset in dataset_list:
                 copy_to_other_dir(app_ns_data, not_sure_train_dir)
 
                 # Load the train and test loader and set for the full dataset
+                # ### 1. TESTING THE IMPACT OF REMOVING THE DEFAULT AUGMENTATION
+                # transform_train = transform_test
                 trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
 
                 print(f"Working on approach {approach}, dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
