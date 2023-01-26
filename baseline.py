@@ -54,7 +54,7 @@ for dataset in dataset_list:
             iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
 
             result_df.loc[len(result_df.index)] = metrics
-            result_df.to_csv('baseline' + '.csv')
+            result_df.to_csv(f'baseline_{dataset.split("/")[-1]}' + '.csv')
 # end time
 end = time.time()
 # total time taken

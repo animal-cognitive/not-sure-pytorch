@@ -28,7 +28,7 @@ from torch.autograd import Variable
 
 import torch
 import numpy as np
-
+import pandas as pd
 
 class Cutout(object):
     """Randomly mask out one or more patches from an image.
@@ -1048,10 +1048,20 @@ def adjust_learning_rate_for_cutmix(learning_rate, optimizer, epoch, epochs):
 def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer, scheduler, best_acc, criterion, device, learning_rate, iteration = None, trial = None, dataset = None, classes = None, current_dataset_file = None):
 
     metrics = []
+    dataframe = pd.DataFrame({})
+
     for epoch in range(epochs):
+
         train_model(net, epoch, trainloader, optimizer, criterion, device, scheduler, learning_rate)
         best_acc = test_model(net, epoch, testloader, current_exp, best_acc, criterion, device)
 
+        checkpoint = torch.load('./checkpoint/' + current_exp + 'ckpt.pth')
+        net.load_state_dict(checkpoint['net'])
+
+        targets, preds, _ = make_prediction(net, testloader)
+        # print(type(preds))
+        dataframe.insert(epoch, str(epoch), preds)
+        # print(dataframe)
         if current_dataset_file:
             with open(current_dataset_file, 'a') as f:
                 if epoch + 1 == epochs:
@@ -1060,10 +1070,11 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                     if iteration is not None and trial is not None and dataset is not None and classes is not None:
                         metrics = [dataset, trial, iteration]
                         print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
-                        targets, preds, _ = make_prediction(net, testloader)
+                        test_targets, preds, _ = make_prediction(net, testloader)
                         test_class_report = classification_report(targets, preds, target_names=classes)
                         test_metrics = get_metrics_from_classi_report(test_class_report)
                         metrics.extend(test_metrics)
+                        dataframe.insert(epochs, str(epochs), targets)
                         print(test_class_report, file = f)
                         print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
                         targets, preds, _ = make_prediction(net, trainloader)
@@ -1072,6 +1083,7 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                         metrics.extend(train_metrics)
                         print(train_class_report, file = f)
 
+    dataframe.to_csv(f'{current_exp}_pred_uncertainty.csv')
     return best_acc, metrics
 
 def process_result(net, trainloader, testloader, classes, current_dataset_file, epoch, epochs, current_exp, dataset, trial, iteration, metrics):

@@ -2,7 +2,9 @@ import torch
 from utils import *
 import config_baseline as args
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-from pytorch_grad_cam.utils.image import show_cam_on_image
+from pytorch_grad_cam.utils.image import show_cam_on_image, deprocess_image
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputSoftmaxTarget
+from pytorch_grad_cam.metrics.cam_mult_image import CamMultImageConfidenceChange
 
 use_cuda = torch.cuda.is_available()
 
@@ -20,10 +22,23 @@ transform_train, transform_test = get_transforms(args.image_size)
 for dataset in dataset_list:
     trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
 
-    # print(t)
+    models_to_test = [
+            # 'base',
+            # 'appr3',
+            'appr4'
+            ]
 
-    models_to_test = ['_ite_0_trial_0_dataset_10%_cifar10_ckpt', '_appr_3_ite_0_trial_0_dataset_10%_cifar10_with_ns_app1_ckpt', '_appr_4_ite_0_trial_0_dataset_10%_cifar10_with_ns_app1_ckpt']
-    img_1_ = 'kiwi_s_000045.png'
+    files_to_predict = [
+        'accentor_s_000685.png',
+        'accentor_s_000033.png',
+        'alauda_arvensis_s_000781.png',
+        'alauda_arvensis_s_001018.png',
+        'bird_s_000574.png',
+        'bird_s_001251.png',
+        'kiwi_s_000045.png',
+        'nandu_s_000735.png'
+        ]
+    correct_class = 0
 
     index = 0
     for path_to_model in models_to_test:
@@ -36,23 +51,35 @@ for dataset in dataset_list:
         # Construct the GradCAM to use
         cam = construct_cam(net.module, [net.module.layer4[-1]], torch.cuda.is_available())
 
-        img_h_ = img_w_ = 32
-        rgb_img_1 = normalize_img_to_rgb(img_1_, img_h_, img_w_)
+        for img_1_ in files_to_predict:
 
-        # get_image_patch(cam, rgb_img)
-        targets = [ClassifierOutputTarget(2)]
+            img_h_ = img_w_ = args.image_size
+            rgb_img_1 = normalize_img_to_rgb(img_1_, img_h_, img_w_)
 
-        input_tensor = preprocess_image(rgb_img_1)
+            # get_image_patch(cam, rgb_img)
+            targets = [ClassifierOutputTarget(correct_class)]
 
-        # You can also pass aug_smooth=True and eigen_smooth=True, to apply smoothing.
-        grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
+            input_tensor = preprocess_image(rgb_img_1)
 
-        # In this example grayscale_cam has only one image in the batch:
-        grayscale_cam = grayscale_cam[0, :]
-        result = show_cam_on_image(rgb_img_1, grayscale_cam, use_rgb=True)
+            # You can also pass aug_smooth=True and eigen_smooth=True, to apply smoothing.
+            grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
 
-        print("Result Shape: ", result.size)
+            # In this example grayscale_cam has only one image in the batch:
+            grayscale_cam = grayscale_cam[0, :]
+            result = show_cam_on_image(rgb_img_1, grayscale_cam, use_rgb=True)
 
-        save_image(result, f'sample{index}.png')
+            save_image(result, f'{img_1_.split(".png")[0]}_{index}.png')
 
+            # Create the metric target, often the confidence drop in a score of some category
+            metric_target = ClassifierOutputSoftmaxTarget(correct_class)
+            scores, batch_visualizations = CamMultImageConfidenceChange()(input_tensor,
+              1 - grayscale_cam, targets, net, return_visualization=True)
+            visualization = batch_visualizations[0].cpu().numpy().transpose((1, 2, 0))
+            # visualization = deprocess_image(batch_visualizations[0, :])
+            save_image(visualization, f'visual.png')
+            print(f"The confidence increase percent: {100*scores[0]}")
+
+            break
         index += 1
+        pred_result = predict_given_images(net, transform_test, files_to_predict)
+        print(f"PREDICTION FOR Model : {path_to_model} is {pred_result}")
