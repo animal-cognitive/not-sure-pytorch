@@ -8,6 +8,7 @@ import shutil, random, os, time, copy, pickle, glob, torch, cv2, sys, math, csv
 from sklearn.metrics import confusion_matrix, accuracy_score, classification_report
 from torchvision import datasets, transforms
 
+import torchvision
 import torch.nn as nn
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
@@ -235,7 +236,7 @@ def load_model_and_train_params(image_size, device, lr, testset, old, cut_out = 
             # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
             net.linear = nn.Linear(num_ftrs, len(testset.classes))
     else:
-        net = trained_models.resnet18(weights=ResNet18_Weights.DEFAULT)
+        net = torchvision.models.resnet18(weights='DEFAULT')
         net.fc = nn.Linear(net.fc.in_features, len(testset.classes))
 
     if device == 'cuda':
