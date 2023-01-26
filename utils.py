@@ -235,7 +235,7 @@ def load_model_and_train_params(image_size, device, lr, testset, old, cut_out = 
             # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
             net.linear = nn.Linear(num_ftrs, len(testset.classes))
     else:
-        net = trained_models.resnet18(pretrained = True)
+        net = trained_models.resnet18(weights=ResNet18_Weights.DEFAULT)
         net.fc = nn.Linear(net.fc.in_features, len(testset.classes))
 
     if device == 'cuda':
