@@ -1,4 +1,4 @@
-# '''Train CIFAR10 with PyTorch.'''
+# '''Baseline using Not-sure approach'''
 
 import argparse, csv, os, time, sys
 
@@ -58,7 +58,7 @@ for dataset in dataset_list:
 
     #2. Split the dataset training into number_of_splits
     no_of_splits = 4
-    #
+
     splits_per_class, class_names = split_dataset(dataset, no_of_splits)
     train_data, full_val = collect_train_and_val_data(splits_per_class, 0)
 
