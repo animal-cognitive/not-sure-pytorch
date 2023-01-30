@@ -1076,8 +1076,8 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                         test_class_report = classification_report(targets, preds, target_names=classes)
                         test_metrics = get_metrics_from_classi_report(test_class_report)
                         metrics.extend(test_metrics)
-                        # dataframe.insert(epochs, str(epochs), targets)
-                        dataframe.loc[epochs] = [str(epochs), targets]
+                        dataframe.insert(epochs, str(epochs), targets)
+                        # dataframe.loc[epochs] = [str(epochs), targets]
                         print(test_class_report, file = f)
                         print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
                         targets, preds, _ = make_prediction(net, trainloader)
