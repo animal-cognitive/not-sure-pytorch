@@ -16,6 +16,7 @@ import models
 from utils import *
 import config_baseline as args
 
+
 use_cuda = torch.cuda.is_available()
 
 best_acc = 0  # best test accuracy
@@ -30,8 +31,10 @@ dataset_list = check_dataset_dir(args.dataset_dir)
 # Data
 print('==> Preparing data..')
 transform_train, transform_test = get_transforms(args.image_size)
-# Remove default augmentation
-# transform_train = transform_test
+
+#Add the RandAugment transformation
+transform_train.transforms.insert(0, transforms.RandAugment(num_ops = 1, magnitude = 2))
+
 
 result_df = pd.DataFrame(columns = ['Dataset', 'Iter', 'Trial',
 'Test_Acc', 'Test, Pre', 'Test_Re', 'Test_F1', 'Train_Acc',
@@ -53,7 +56,7 @@ for dataset in dataset_list:
             iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
 
             result_df.loc[len(result_df.index)] = metrics
-            result_df.to_csv(f'baseline_{dataset.split("/")[-1]}' + '.csv')
+            result_df.to_csv('baseline_randaug' + '.csv')
 # end time
 end = time.time()
 # total time taken

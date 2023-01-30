@@ -16,6 +16,7 @@ import models
 from utils import *
 import config_baseline as args
 
+
 use_cuda = torch.cuda.is_available()
 
 best_acc = 0  # best test accuracy
@@ -30,8 +31,6 @@ dataset_list = check_dataset_dir(args.dataset_dir)
 # Data
 print('==> Preparing data..')
 transform_train, transform_test = get_transforms(args.image_size)
-# Remove default augmentation
-# transform_train = transform_test
 
 result_df = pd.DataFrame(columns = ['Dataset', 'Iter', 'Trial',
 'Test_Acc', 'Test, Pre', 'Test_Re', 'Test_F1', 'Train_Acc',
@@ -49,11 +48,11 @@ for dataset in dataset_list:
             current_exp = "_ite_" + str(iteration) + "_trial_" + str(trial) + "_dataset_" + dataset.split("/")[-1] + "_"
 
             net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
-            _, metrics = run_experiment(trainloader, testloader, current_exp, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr,
+            _, metrics = run_experiment_mixup_approach(trainloader, testloader, current_exp, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr,
             iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
 
             result_df.loc[len(result_df.index)] = metrics
-            result_df.to_csv(f'baseline_{dataset.split("/")[-1]}' + '.csv')
+            result_df.to_csv(f'baseline_mixup_{dataset.split("/")[-1]}' + '.csv')
 # end time
 end = time.time()
 # total time taken
