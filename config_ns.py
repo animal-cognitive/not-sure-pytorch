@@ -10,8 +10,8 @@ iterations = 4 # type=int, help='Number of times to run the complete experiment'
 epochs = 200 # type=int, help='Epochs')
 name = '0' # type=str, help='name of run')
 seed = 0 # type=int, help='random seed')
-batch_size = 128 # type=int, help='batch size')
-# batch_size = 64
+# batch_size = 128 # type=int, help='batch size')
+batch_size = 64
 no_augment = False # help='use standard augmentation (default: True)')
 alpha = 1. # type=float, help='mixup interpolation coefficient (default: 1)')
 # image_size = 224 # type=int, help='input image size')
