@@ -1061,8 +1061,8 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
 
         targets, preds, _ = make_prediction(net, testloader)
         # print(type(preds))
-        # dataframe.insert(epoch, str(epoch), preds)
-        dataframe.loc[epoch] = [str(epoch), preds]
+        dataframe.insert(epoch, str(epoch), preds)
+        # dataframe.loc[epoch] = [str(epoch), preds]
         # print(dataframe)
         if current_dataset_file:
             with open(current_dataset_file, 'a') as f:
