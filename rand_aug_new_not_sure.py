@@ -29,7 +29,7 @@ dataset_list = check_dataset_dir(args.dataset_dir)
 
 # Data
 print('==> Preparing data..')
-transform_train, transform_test = get_transforms(args.image_size)
+transform_train, transform_test = get_transforms(args.image_size, rand_aug = True)
 
 transform_train.transforms.insert(0, transforms.RandAugment(num_ops = 1, magnitude = 2))
 
