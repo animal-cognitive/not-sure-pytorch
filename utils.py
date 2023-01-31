@@ -1176,7 +1176,8 @@ def test_model(net, epoch, loader, current_exp, best_acc, criterion, device):
 
     # Save checkpoint.
     acc = 100.*correct/total
-    if acc > best_acc:
+    print(f"Utils: best_acc: {best_acc} and acc: {acc}")
+    if acc >= best_acc:
         print('Saving..')
         state = {
             'net': net.state_dict(),
@@ -1187,6 +1188,8 @@ def test_model(net, epoch, loader, current_exp, best_acc, criterion, device):
             os.mkdir('checkpoint')
         torch.save(state, f'./checkpoint/{current_exp}ckpt.pth')
         best_acc = acc
+    else:
+        print('Not saving this time !!!')
 
     return best_acc
 
