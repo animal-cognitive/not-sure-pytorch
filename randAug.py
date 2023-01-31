@@ -30,11 +30,10 @@ dataset_list = check_dataset_dir(args.dataset_dir)
 
 # Data
 print('==> Preparing data..')
-transform_train, transform_test = get_transforms(args.image_size)
+transform_train, transform_test = get_transforms(args.image_size, rand_aug = True)
 
 #Add the RandAugment transformation
 transform_train.transforms.insert(0, transforms.RandAugment(num_ops = 1, magnitude = 2))
-
 
 result_df = pd.DataFrame(columns = ['Dataset', 'Iter', 'Trial',
 'Test_Acc', 'Test, Pre', 'Test_Re', 'Test_F1', 'Train_Acc',
