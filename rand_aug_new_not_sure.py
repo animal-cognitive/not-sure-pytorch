@@ -107,6 +107,7 @@ for dataset in dataset_list:
     batch_size = args.batch_size
     trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
 
+    best_acc = 0
     for iter in range(args.subset_train_iter):
         # Load the model
         net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
