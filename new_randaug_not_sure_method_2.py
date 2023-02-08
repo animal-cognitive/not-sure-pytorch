@@ -34,6 +34,7 @@ dataset_list = check_dataset_dir(args.dataset_dir)
 # Data
 print('==> Preparing data..')
 transform_train, transform_test = get_transforms(args.image_size)
+transform_train.transforms.insert(0, transforms.RandAugment(num_ops = 1, magnitude = 2))
 
 result_df = pd.DataFrame(columns = ['Approach', 'Dataset', 'Iter', 'Trial',
 'Test_Acc', 'Test, Pre', 'Test_Re', 'Test_F1', 'Train_Acc',
@@ -290,13 +291,6 @@ for dataset in dataset_list:
 
                 net = torch.nn.DataParallel(net)
                 net = net.to(device)
-
-                # Freeze all layers except the last layer
-                # for name, param in net.named_parameters():
-                #     if froozen_layer in name:
-                #         param.requires_grad = True
-                #     else:
-                #         param.requires_grad = False
 
                 net, criterion, optimizer, scheduler = load_current_model_and_train_params(net, args.lr, args.use_old)
 

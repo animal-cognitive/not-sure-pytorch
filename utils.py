@@ -5,8 +5,9 @@
 '''
 import shutil, random, os, time, copy, pickle, glob, torch, cv2, sys, math, csv
 
-from sklearn.metrics import confusion_matrix, accuracy_score, classification_report
+from sklearn.metrics import confusion_matrix, accuracy_score, classification_report, ConfusionMatrixDisplay
 from torchvision import datasets, transforms
+from pretty_confusion_matrix import pp_matrix_from_data
 
 import torchvision
 import torch.nn as nn
@@ -30,6 +31,7 @@ from torch.autograd import Variable
 import torch
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 
 class Cutout(object):
     """Randomly mask out one or more patches from an image.
@@ -207,12 +209,12 @@ def copy_to_other_dir(from_dir, to_dir):
 
     shutil.copytree(from_dir, to_dir)
 
-def get_loaders_and_dataset(dataset, transform_train, transform_test, batch_size):
+def get_loaders_and_dataset(dataset, transform_train, transform_test, batch_size, train_path='train'):
 
     testset = ImageFolderWithPaths(os.path.join(dataset, 'test'), transform_test)
     testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
 
-    trainset = ImageFolderWithPaths(os.path.join(dataset, 'train'), transform_train)
+    trainset = ImageFolderWithPaths(os.path.join(dataset, train_path), transform_train)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
 
     return trainset, trainloader, testset, testloader
@@ -1078,6 +1080,14 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                         metrics.extend(test_metrics)
                         dataframe.insert(epochs, str(epochs), targets)
                         # dataframe.loc[epochs] = [str(epochs), targets]
+                        # print(classes)
+                        # res = pp_matrix_from_data(targets, preds)
+                        # fig = plt.figure(figsize=(20, 20))
+                        # cm_display = ConfusionMatrixDisplay(confusion_matrix = conf_matrix, display_labels = classes)
+                        # cm_display.plot()
+                        # plt.savefig('foo.png')
+                        # plt.close(fig)
+                        # print(conf_matrix, file = f)
                         print(test_class_report, file = f)
                         print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
                         targets, preds, _ = make_prediction(net, trainloader)
@@ -1085,6 +1095,7 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                         train_metrics = get_metrics_from_classi_report(train_class_report)
                         metrics.extend(train_metrics)
                         print(train_class_report, file = f)
+
 
     dataframe.to_csv(f'{current_exp}_pred_uncertainty.csv')
     return best_acc, metrics
@@ -1379,7 +1390,10 @@ def get_metrics_from_classi_report(classification_report):
 
     return accuracy, precision, recall, f1_score
 
-def mix(cam, images_from_c, images_from_c_hat, image_size, dataset_dir, threshold_, min_val_, approach_list):
+def mix(cam, images_from_c, images_from_c_hat, image_size, dataset_dir, threshold_, min_val_, approach_list, sure_or_not_sure_folder = "Not_Sure"):
+    '''
+    sure_or_not_sure_folder - Used to determine whether to save the image in the sure folder or Not_Sure folder
+    '''
     if images_from_c and images_from_c_hat:
         for i in range(len(images_from_c_hat)):
             img_1 = images_from_c_hat[i]
@@ -1387,7 +1401,7 @@ def mix(cam, images_from_c, images_from_c_hat, image_size, dataset_dir, threshol
             img_2 = images_from_c[i]
 
             for approach in approach_list:
-                file_path = dataset_dir + f"/approach_{approach}/Not_Sure/" + img_1.split("/")[-1].split(".")[0] + "_" + img_2.split("/")[-1].split(".")[0] + ".jpg"
+                file_path = dataset_dir + f"/approach_{approach}/{sure_or_not_sure_folder}/" + img_1.split("/")[-1].split(".")[0] + "_" + img_2.split("/")[-1].split(".")[0] + ".jpg"
                 if approach == 1:
                     approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
                 elif approach == 2:

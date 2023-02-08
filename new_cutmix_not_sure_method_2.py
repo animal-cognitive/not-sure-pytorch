@@ -93,7 +93,7 @@ for dataset in dataset_list:
         net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
 
         # Run the model
-        best_acc, _ = run_experiment(trainloader, testloader, subset_dataset, args.ns_epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
+        best_acc, _ = run_experiment_cutmix_approach(trainloader, testloader, subset_dataset, args.ns_epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
 
     # Load the best weak model
     checkpoint = torch.load(f'./checkpoint/{subset_dataset}ckpt.pth')
@@ -131,7 +131,7 @@ for dataset in dataset_list:
         net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
 
         # Run the model
-        best_acc, _ = run_experiment(trainloader, testloader, dataset.split("/")[-1], args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
+        best_acc, _ = run_experiment_cutmix_approach(trainloader, testloader, dataset.split("/")[-1], args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
 
     # Load the best good model
     checkpoint = torch.load(f'./checkpoint/{dataset.split("/")[-1]}ckpt.pth')
@@ -273,7 +273,7 @@ for dataset in dataset_list:
 
                 best_acc = 0  # best test accuracy
 
-                run_experiment(trainloader, testloader, current_exp, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
+                run_experiment_cutmix_approach(trainloader, testloader, current_exp, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
 
                 # Load the train and test loader and set for the full original dataset
                 trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
@@ -307,7 +307,7 @@ for dataset in dataset_list:
                 epochs_for_transfer_learning = args.epochs
                 if epochs_for_transfer_learning < 1:
                     epochs_for_transfer_learning = 1
-                _, metrics = run_experiment(trainloader, testloader, current_exp, epochs_for_transfer_learning, net, optimizer, scheduler, best_acc, criterion, device, args.lr, iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
+                _, metrics = run_experiment_cutmix_approach(trainloader, testloader, current_exp, epochs_for_transfer_learning, net, optimizer, scheduler, best_acc, criterion, device, args.lr, iteration = iteration, trial = trial, dataset = dataset, classes = testset.classes, current_dataset_file = current_dataset_file)
 
                 # Add the current approach
                 metrics.insert(0, approach)
