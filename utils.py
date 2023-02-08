@@ -7,7 +7,7 @@ import shutil, random, os, time, copy, pickle, glob, torch, cv2, sys, math, csv
 
 from sklearn.metrics import confusion_matrix, accuracy_score, classification_report, ConfusionMatrixDisplay
 from torchvision import datasets, transforms
-from pretty_confusion_matrix import pp_matrix_from_data
+# from pretty_confusion_matrix import pp_matrix_from_data
 
 import torchvision
 import torch.nn as nn
