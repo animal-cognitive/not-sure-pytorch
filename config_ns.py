@@ -3,7 +3,7 @@ resume = False # help='resume from checkpoint')
 model = "ResNet18" #type=str, help='model type (default: ResNet18)')
 # dataset_dir = '../Kvasir - Aziz_224' # type=str, help='The location of the dataset to be explored')
 # dataset_dir = '../DS1'
-dataset_name = 'CIFAR10'
+dataset_name = 'Kvasir'
 dataset_dir = 'Data'
 subset_folder = 'SUBSET_FOLDER' # type=str, help='Temporary location for dataset')
 trials = 2 # type=int, help='Number of times to run the complete experiment')
@@ -29,6 +29,10 @@ if dataset_name == 'CIFAR10':
     batch_size = 128
     image_size = 32
 
+elif dataset_name == 'Kvasir':
+    batch_size = 64
+    image_size = 224
+    
 # Cut-out config
 n_holes = 1 #help='number of holes to cut out from image')
 length = 16 # help='length of the holes')
