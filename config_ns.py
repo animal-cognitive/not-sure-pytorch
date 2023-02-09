@@ -3,8 +3,8 @@ resume = False # help='resume from checkpoint')
 model = "ResNet18" #type=str, help='model type (default: ResNet18)')
 # dataset_dir = '../Kvasir - Aziz_224' # type=str, help='The location of the dataset to be explored')
 # dataset_dir = '../DS1'
-dataset_name = 'Kvasir'
-dataset_dir = 'Data_Kvasir'
+dataset_name = 'bloodmnist'
+dataset_dir = 'Data_bloodmnist'
 subset_folder = 'SUBSET_FOLDER' # type=str, help='Temporary location for dataset')
 trials = 2 # type=int, help='Number of times to run the complete experiment')
 iterations = 4 # type=int, help='Number of times to run the complete experiment')
@@ -32,6 +32,10 @@ if dataset_name == 'CIFAR10':
 elif dataset_name == 'Kvasir':
     batch_size = 64
     image_size = 224
+
+elif dataset_name == 'bloodmnist':
+    batch_size = 128
+    image_size = 28
 
 # Cut-out config
 n_holes = 1 #help='number of holes to cut out from image')
