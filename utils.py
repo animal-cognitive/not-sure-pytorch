@@ -425,6 +425,9 @@ def split_into_k(list_to_split, number_of_splits):
     number_of_splits - the number of splits to create
     """
 
+    # Shuffle the training data list
+    random.shuffle(list_to_split)
+
     # The size of each split
     range_to_use = int(len(list_to_split) / number_of_splits)
 
