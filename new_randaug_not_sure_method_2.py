@@ -280,14 +280,14 @@ for dataset in dataset_list:
                 trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)
 
                 # Retrain the current model but without the sure_not-sure binary classification task
-                net = net.module
-                froozen_layer = ""
-                if args.image_size == 32:
-                    froozen_layer = "linear"
-                    net.linear = nn.Linear(net.linear.in_features, len(testset.classes))
-                else:
-                    froozen_layer = "fc"
-                    net.fc = nn.Linear(net.fc.in_features, len(testset.classes))
+                # net = net.module
+                # froozen_layer = ""
+                # if args.image_size == 32:
+                #     froozen_layer = "linear"
+                #     net.linear = nn.Linear(net.linear.in_features, len(testset.classes))
+                # else:
+                #     froozen_layer = "fc"
+                #     net.fc = nn.Linear(net.fc.in_features, len(testset.classes))
 
                 net = torch.nn.DataParallel(net)
                 net = net.to(device)
