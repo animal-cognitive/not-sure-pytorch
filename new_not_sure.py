@@ -81,6 +81,9 @@ for dataset in dataset_list:
     checkpoint = torch.load(f'./checkpoint/{subset_dataset}ckpt.pth')
     net.load_state_dict(checkpoint['net'])
 
+    # Reset the best accuracy value
+    best_acc = 0
+
     current_dataset_file = dataset.split("/")[-1] + '_.txt'
 
     # Make prediction on the subset dataset
