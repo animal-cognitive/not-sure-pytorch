@@ -3,8 +3,8 @@ resume = False # help='resume from checkpoint')
 model = "ResNet18" #type=str, help='model type (default: ResNet18)')
 # dataset_dir = '../Kvasir - Aziz_224' # type=str, help='The location of the dataset to be explored')
 # dataset_dir = '../DS1'
-dataset_name = 'bloodmnist'
-dataset_dir = 'Data_bloodmnist'
+dataset_name = 'Kvasir'
+dataset_dir = 'Data_Kvasir'
 subset_folder = 'SUBSET_FOLDER' # type=str, help='Temporary location for dataset')
 trials = 2 # type=int, help='Number of times to run the complete experiment')
 iterations = 4 # type=int, help='Number of times to run the complete experiment')
