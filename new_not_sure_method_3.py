@@ -262,18 +262,24 @@ for dataset in dataset_list:
                     for filename in app_data_list[int(0.9 * len(app_data_list)):]:
                         shutil.copy(filename, test_data_folder)
 
-                # Load the train and test loader and set for the full dataset
-                trainset, trainloader, testset, testloader = get_loaders_and_dataset(sure_not_sure_dataset_folder, transform_train, transform_test, args.batch_size)
+                # # Load the train and test loader and set for the full dataset
+                # trainset, trainloader, testset, testloader = get_loaders_and_dataset(sure_not_sure_dataset_folder, transform_train, transform_test, args.batch_size)
+                #
+                # print(f"Working on approach {approach}, dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
+                # current_exp = "_appr_"  + str(approach) + "_ite_" + str(iteration) + "_trial_" + str(trial) + "_dataset_" + dataset.split("/")[-1] + "_"
+                #
+                # # Load the model
+                # net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
+                #
+                # best_acc = 0  # best test accuracy
+                #
+                # run_experiment(trainloader, testloader, current_exp, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
 
-                print(f"Working on approach {approach}, dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
-                current_exp = "_appr_"  + str(approach) + "_ite_" + str(iteration) + "_trial_" + str(trial) + "_dataset_" + dataset.split("/")[-1] + "_"
+                #1. Get loader for multiclass classification
+                #2. Load the model and criterion for multiclass classification
+                #3. Run the model for that task
 
-                # Load the model
-                net, criterion, optimizer, scheduler = load_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
 
-                best_acc = 0  # best test accuracy
-
-                run_experiment(trainloader, testloader, current_exp, args.epochs, net, optimizer, scheduler, best_acc, criterion, device, args.lr)
 
                 # Load the train and test loader and set for the full original dataset
                 trainset, trainloader, testset, testloader = get_loaders_and_dataset(dataset, transform_train, transform_test, args.batch_size)

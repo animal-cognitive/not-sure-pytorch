@@ -97,6 +97,22 @@ class CustomDataSet(torch.utils.data.Dataset):
 
         return (self.i, self.label.item(), self.imagepath)
 
+# Load Data and labels from filelist
+class MultiClassDataset(torch.utils.data.Dataset):
+    def __init__(self, imagelist, transform):
+        self.imagepaths = imagelist
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.imagepaths)
+
+    def __getitem__(self, index):
+        self.imagepath = self.imagepaths[index]
+        self.image = Image.open(self.imagepath)
+        self.label = self.imagepath.split("mixup_clases")[-1].split("split_class_here")
+        self.i = self.transform(self.image)
+
+        return (self.i, self.label.item(), self.imagepath)
 
 
 def get_transforms(img_size = None, rand_aug = False):
