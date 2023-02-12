@@ -3,7 +3,7 @@ resume = False # help='resume from checkpoint')
 model = "ResNet18" #type=str, help='model type (default: ResNet18)')
 # dataset_dir = '../Kvasir - Aziz_224' # type=str, help='The location of the dataset to be explored')
 # dataset_dir = '../DS1'
-dataset_name = 'CIFAR10'
+dataset_name = 'STL10'
 dataset_dir = f'Data_{dataset_name}'
 subset_folder = 'SUBSET_FOLDER' # type=str, help='Temporary location for dataset')
 trials = 4 # type=int, help='Number of times to run the complete experiment')
