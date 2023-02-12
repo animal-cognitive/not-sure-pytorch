@@ -79,6 +79,52 @@ class ImageFolderWithPaths(datasets.ImageFolder):
     def __getitem__(self, index):
         return super(ImageFolderWithPaths, self).__getitem__(index) + (self.imgs[index][0],)
 
+# Allow to get the file paths and multilabels for image labels
+# File path looks like this if it contains class 3 and 4
+# file_path = "image43_mixup_classes3split_class_here4.jpg"
+# Split into the separate classes using file_path.split(".")[0].split("mixup_classes")[-1].split("split_class_here")
+# class ImageFolderWithMultiLabels(datasets.ImageFolder):
+#     def __getitem__(self, index):
+#         labels = self.imgs[index][0].split(".")[0].split("mixup_classes")[-1].split("split_class_here")
+#         # Convert the labels to int list, use set so repeated classes are removed
+#         set_labels = set()
+#         for label in labels:
+#             set_labels.add(int(label))
+#
+#         set_labels = list(set_labels)
+#
+#         labels = torch.tensor(set_labels).unsqueeze(0)
+#         targets = torch.zeros(labels.size(0), 8).scatter_(1, labels, 1.)
+#         targets = targets.squeeze()
+#         return super(ImageFolderWithMultiLabels, self).__getitem__(index) + (targets,)
+
+class ImageFolderWithMultiLabels(torch.utils.data.Dataset):
+    def __init__(self, imagelist, transform, no_of_classes):
+        self.imagepaths = imagelist
+        self.transform = transform
+        self.no_of_classes = no_of_classes
+
+    def __len__(self):
+        return len(self.imagepaths)
+
+    def __getitem__(self, index):
+        self.imagepath = self.imagepaths[index]
+        self.image = Image.open(self.imagepath)
+        self.i = self.transform(self.image)
+
+        labels = self.imagepaths[index][0].split(".")[0].split("mixup_classes")[-1].split("split_class_here")
+        # Convert the labels to int list, use set so repeated classes are removed
+        set_labels = set()
+        for label in labels:
+            set_labels.add(int(label))
+
+        set_labels = list(set_labels)
+
+        labels = torch.tensor(set_labels).unsqueeze(0)
+        targets = torch.zeros(labels.size(0), self.no_of_classes).scatter_(1, labels, 1.)
+        targets = targets.squeeze()
+        return (self.i, targets)
+
 # Load Dataset loader from file list
 class CustomDataSet(torch.utils.data.Dataset):
     def __init__(self, imagelist, labels, transform):
@@ -96,24 +142,6 @@ class CustomDataSet(torch.utils.data.Dataset):
         self.i = self.transform(self.image)
 
         return (self.i, self.label.item(), self.imagepath)
-
-# Load Data and labels from filelist
-class MultiClassDataset(torch.utils.data.Dataset):
-    def __init__(self, imagelist, transform):
-        self.imagepaths = imagelist
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.imagepaths)
-
-    def __getitem__(self, index):
-        self.imagepath = self.imagepaths[index]
-        self.image = Image.open(self.imagepath)
-        self.label = self.imagepath.split("mixup_clases")[-1].split("split_class_here")
-        self.i = self.transform(self.image)
-
-        return (self.i, self.label.item(), self.imagepath)
-
 
 def get_transforms(img_size = None, rand_aug = False):
     if not img_size:
@@ -235,6 +263,16 @@ def get_loaders_and_dataset(dataset, transform_train, transform_test, batch_size
 
     return trainset, trainloader, testset, testloader
 
+def get_loaders_and_dataset_with_multilabels(dataset, transform_train, transform_test, batch_size, no_of_classes, train_path='train'):
+
+    testset = ImageFolderWithMultiLabels(glob.glob(dataset + "/test/*/*"), transform_test, no_of_classes)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
+
+    trainset = ImageFolderWithMultiLabels(glob.glob(dataset + f"/{train_path}/*/*"), transform_train, no_of_classes)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
+
+    return trainset, trainloader, testset, testloader
+
 def load_model_and_train_params(image_size, device, lr, testset, old, cut_out = False):
     # Model
 
@@ -263,6 +301,51 @@ def load_model_and_train_params(image_size, device, lr, testset, old, cut_out = 
         cudnn.benchmark = True
 
     criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(net.parameters(), lr=lr,
+                          momentum=0.9, weight_decay=weight_decay)
+
+    if old:
+        scheduler = None
+    else:
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+
+
+    if cut_out:
+        optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=5e-4)
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)
+
+    return net, criterion, optimizer, scheduler
+
+def load_multilabel_model_and_train_params(image_size, device, lr, testset, old, cut_out = False):
+    # Model
+
+    no_of_classes = len(testset.classes)
+
+    weight_decay = 1e-4
+    print('==> Building model..')
+    if image_size == 32:
+        if old:
+            net = models.__dict__['ResNet18'](num_classes=no_of_classes)
+        else:
+            weight_decay = 5e-4
+            net = models_new.ResNet18(num_classes=no_of_classes)
+
+        net = net.to(device)
+        if image_size == 32:
+            ### Update the number of classes to predict
+            num_ftrs = net.linear.in_features
+            # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
+            net.linear = nn.Linear(num_ftrs, no_of_classes)
+    else:
+        net = torchvision.models.resnet18(weights='DEFAULT')
+        net.fc = nn.Linear(net.fc.in_features, no_of_classes)
+
+    if device == 'cuda':
+        net.cuda()
+        net = nn.DataParallel(net)
+        cudnn.benchmark = True
+
+    criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = optim.SGD(net.parameters(), lr=lr,
                           momentum=0.9, weight_decay=weight_decay)
 
@@ -1119,6 +1202,20 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
     dataframe.to_csv(f'{current_exp}_pred_uncertainty.csv')
     return best_acc, metrics
 
+def run_experiment_for_multilabels(trainloader, testloader, current_exp, epochs, net, optimizer, scheduler, best_acc, criterion, device, learning_rate, iteration = None, trial = None, dataset = None, classes = None, current_dataset_file = None):
+
+    metrics = []
+    dataframe = pd.DataFrame({})
+
+    for epoch in range(epochs):
+
+        train_model_with_multilabels(net, epoch, trainloader, optimizer, criterion, device, scheduler, learning_rate)
+        best_acc = test_model_with_multilabels(net, epoch, testloader, current_exp, best_acc, criterion, device)
+
+        checkpoint = torch.load('./checkpoint/' + current_exp + 'ckpt.pth')
+        net.load_state_dict(checkpoint['net'])
+    return best_acc, metrics
+
 def process_result(net, trainloader, testloader, classes, current_dataset_file, epoch, epochs, current_exp, dataset, trial, iteration, metrics):
     with open(current_dataset_file, 'a') as f:
         if epoch + 1 == epochs:
@@ -1152,6 +1249,78 @@ def run_experiment_mixup_approach(trainloader, testloader, current_exp, epochs, 
         metrics = process_result(net, trainloader, testloader, classes, current_dataset_file, epoch, epochs, current_exp, dataset, trial, iteration, metrics)
 
     return best_acc, metrics
+
+# Training
+def train_model_with_multilabels(net, epoch, loader, optimizer, criterion, device, scheduler, learning_rate):
+    print('\nEpoch: %d' % epoch)
+    # net.to(device)
+    net.train()
+    train_loss = 0
+    correct = 1
+    total = 1
+    for batch_idx, data in enumerate(loader):
+        inputs, targets = data
+
+        inputs, targets = inputs.to(device), targets.to(device)
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+
+        if scheduler:
+            scheduler.step()
+        else:
+            adjust_learning_rate(learning_rate, optimizer, epoch)
+
+        train_loss += loss.data.item()
+        _, predicted = outputs.max(1)
+        # total += targets.size(0)
+        # correct += predicted.eq(targets).sum().item()
+
+        progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                     % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+
+
+def test_model_with_multilabels(net, epoch, loader, current_exp, best_loss, criterion, device):
+    net.eval()
+    test_loss = 0
+    correct = 1
+    total = 1
+    with torch.no_grad():
+        for batch_idx, data in enumerate(loader):
+            inputs, targets = data
+
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = net(inputs)
+            loss = criterion(outputs, targets)
+
+            test_loss += loss.data.item()
+            _, predicted = outputs.max(1)
+            # total += targets.size(0)
+            # correct += predicted.eq(targets).sum().item()
+
+            progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                         % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+
+    # Save checkpoint.
+    # acc = 100.*correct/total
+    print(f"Utils: best_loss: {best_loss} and loss: {test_loss}")
+    if test_loss <= best_loss:
+        print('Saving..')
+        state = {
+            'net': net.state_dict(),
+            'loss': test_loss,
+            'epoch': epoch,
+        }
+        if not os.path.isdir('checkpoint'):
+            os.mkdir('checkpoint')
+        torch.save(state, f'./checkpoint/{current_exp}ckpt.pth')
+        best_loss = test_loss
+    else:
+        print('Not saving this time !!!')
+
+    return best_loss
 
 # Training
 def train_model(net, epoch, loader, optimizer, criterion, device, scheduler, learning_rate):
@@ -1409,7 +1578,7 @@ def get_metrics_from_classi_report(classification_report):
 
     return accuracy, precision, recall, f1_score
 
-def mix(cam, images_from_c, images_from_c_hat, image_size, dataset_dir, threshold_, min_val_, approach_list, sure_or_not_sure_folder = "Not_Sure"):
+def mix(cam, images_from_c, images_from_c_hat, image_size, dataset_dir, threshold_, min_val_, approach_list, sure_or_not_sure_folder = "Not_Sure", class_c = 0, class_c_hat = 0, add_class_name_to_naming = False):
     '''
     sure_or_not_sure_folder - Used to determine whether to save the image in the sure folder or Not_Sure folder
     '''
@@ -1420,7 +1589,12 @@ def mix(cam, images_from_c, images_from_c_hat, image_size, dataset_dir, threshol
             img_2 = images_from_c[i]
 
             for approach in approach_list:
-                file_path = dataset_dir + f"/approach_{approach}/{sure_or_not_sure_folder}/" + img_1.split("/")[-1].split(".")[0] + "_" + img_2.split("/")[-1].split(".")[0] + ".jpg"
+                file_path = dataset_dir + f"/approach_{approach}/{sure_or_not_sure_folder}/" + img_1.split("/")[-1].split(".")[0] + "_" + img_2.split("/")[-1].split(".")[0]
+                if add_class_name_to_naming:
+                    # file_path = "image43_mixup_classes3split_class_here4.jpg"
+                    file_path += 'mixup_classes' + str(class_c) + 'split_class_here' + str(class_c_hat)
+                file_path += ".jpg"
+
                 if approach == 1:
                     approach_1(img_1, img_2, image_size, image_size, cam, file_path, threshold_, min_val_)
                 elif approach == 2:
