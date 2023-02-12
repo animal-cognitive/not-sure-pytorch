@@ -267,7 +267,7 @@ for dataset in dataset_list:
                 net, criterion, optimizer, scheduler = load_multilabel_model_and_train_params(args.image_size, device, args.lr, testset, args.use_old)
 
                 # Load the train and test loader and set for the full dataset
-                trainset, trainloader, testset, testloader = get_loaders_and_dataset_with_multilabels(sure_not_sure_dataset_folder, transform_train, transform_test, args.batch_size, no_of_classes = testset.classes)
+                trainset, trainloader, testset, testloader = get_loaders_and_dataset_with_multilabels(sure_not_sure_dataset_folder, transform_train, transform_test, args.batch_size, no_of_classes = len(testset.classes))
 
                 print(f"Working on approach {approach}, dataset: ", dataset, " in iteration ", iteration, " and model ", trial)
                 current_exp = "_appr_"  + str(approach) + "_ite_" + str(iteration) + "_trial_" + str(trial) + "_dataset_" + dataset.split("/")[-1] + "_"
