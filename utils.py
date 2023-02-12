@@ -112,7 +112,7 @@ class ImageFolderWithMultiLabels(torch.utils.data.Dataset):
         self.image = Image.open(self.imagepath)
         self.i = self.transform(self.image)
 
-        labels = self.imagepaths[index][0].split(".")[0].split("mixup_classes")[-1].split("split_class_here")
+        labels = self.imagepath.split(".")[0].split("mixup_classes")[-1].split("split_class_here")
         # Convert the labels to int list, use set so repeated classes are removed
         set_labels = set()
         for label in labels:
