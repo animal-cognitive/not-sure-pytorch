@@ -26,7 +26,7 @@ if args.seed != 0:
     torch.manual_seed(args.seed)
 
 dataset_list = check_dataset_dir(args.dataset_dir)
-
+print(device)
 # Data
 print('==> Preparing data..')
 transform_train, transform_test = get_transforms(args.image_size)

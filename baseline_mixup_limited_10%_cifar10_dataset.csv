@@ -1,0 +1,2 @@
+,Dataset,Iter,Trial,Test_Acc,"Test, Pre",Test_Re,Test_F1,Train_Acc,Train_Pre,Train_Re,Train_F1
+0,../PT4AL/DATASETS/limited_10%_cifar10_dataset,0,0,0.67,0.68,0.67,0.67,0.74,0.74,0.74,0.74

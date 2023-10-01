@@ -279,6 +279,7 @@ def load_model_and_train_params(image_size, device, lr, testset, old, cut_out = 
     weight_decay = 1e-4
     print('==> Building model..')
     if image_size == 32:
+        print("Loading from if image_size == 32")
         if old:
             net = models.__dict__['ResNet18'](num_classes=len(testset.classes))
         else:
@@ -292,7 +293,9 @@ def load_model_and_train_params(image_size, device, lr, testset, old, cut_out = 
             # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
             net.linear = nn.Linear(num_ftrs, len(testset.classes))
     else:
-        net = torchvision.models.resnet18(weights='DEFAULT')
+        print("Not Loading from if image_size == 32")
+        # net = torchvision.models.resnet18(weights='DEFAULT')
+        net = trained_models.resnet18(pretrained = True)
         net.fc = nn.Linear(net.fc.in_features, len(testset.classes))
 
     if device == 'cuda':
@@ -1160,12 +1163,12 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
         train_model(net, epoch, trainloader, optimizer, criterion, device, scheduler, learning_rate)
         best_acc = test_model(net, epoch, testloader, current_exp, best_acc, criterion, device)
 
-        checkpoint = torch.load('./checkpoint/' + current_exp + 'ckpt.pth')
-        net.load_state_dict(checkpoint['net'])
+        # checkpoint = torch.load('./checkpoint/' + current_exp + 'ckpt.pth')
+        # net.load_state_dict(checkpoint['net'])
 
-        targets, preds, _ = make_prediction(net, testloader)
+        # targets, preds, _ = make_prediction(net, testloader)
         # print(type(preds))
-        dataframe.insert(epoch, str(epoch), preds)
+        # dataframe.insert(epoch, str(epoch), preds)
         # dataframe.loc[epoch] = [str(epoch), preds]
         # print(dataframe)
         if current_dataset_file:
@@ -1176,20 +1179,12 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                     if iteration is not None and trial is not None and dataset is not None and classes is not None:
                         metrics = [dataset, trial, iteration]
                         print("Test result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
-                        test_targets, preds, _ = make_prediction(net, testloader)
+                        targets, preds, _ = make_prediction(net, testloader)
                         test_class_report = classification_report(targets, preds, target_names=classes)
                         test_metrics = get_metrics_from_classi_report(test_class_report)
                         metrics.extend(test_metrics)
-                        dataframe.insert(epochs, str(epochs), targets)
-                        # dataframe.loc[epochs] = [str(epochs), targets]
-                        # print(classes)
-                        # res = pp_matrix_from_data(targets, preds)
-                        # fig = plt.figure(figsize=(20, 20))
-                        # cm_display = ConfusionMatrixDisplay(confusion_matrix = conf_matrix, display_labels = classes)
-                        # cm_display.plot()
-                        # plt.savefig('foo.png')
-                        # plt.close(fig)
-                        # print(conf_matrix, file = f)
+                        # dataframe.insert(epochs, str(epochs), targets)
+
                         print(test_class_report, file = f)
                         print("Train result for iteration ", iteration, " experiment: ", trial, "dataset", dataset, file = f)
                         targets, preds, _ = make_prediction(net, trainloader)
@@ -1199,7 +1194,7 @@ def run_experiment(trainloader, testloader, current_exp, epochs, net, optimizer,
                         print(train_class_report, file = f)
 
 
-    dataframe.to_csv(f'{current_exp}_pred_uncertainty.csv')
+    # dataframe.to_csv(f'{current_exp}_pred_uncertainty.csv')
     return best_acc, metrics
 
 def run_experiment_for_multilabels(trainloader, testloader, current_exp, epochs, net, optimizer, scheduler, best_acc, criterion, device, learning_rate, iteration = None, trial = None, dataset = None, classes = None, current_dataset_file = None):
@@ -1242,6 +1237,19 @@ def run_experiment_mixup_approach(trainloader, testloader, current_exp, epochs, 
     metrics = []
     for epoch in range(epochs):
         train_mixup_approach(net, epoch, trainloader, criterion, optimizer, device, alpha)
+        best_acc = test_mixup_approach(net, epoch, testloader, criterion, best_acc, device, current_exp)
+        adjust_learning_rate(learning_rate, optimizer, epoch)
+
+    if current_dataset_file:
+        metrics = process_result(net, trainloader, testloader, classes, current_dataset_file, epoch, epochs, current_exp, dataset, trial, iteration, metrics)
+
+    return best_acc, metrics
+
+def run_experiment_mixup_approach_on_most_confused_only(trainloader, testloader, current_exp, epochs, net, optimizer, scheduler, best_acc, criterion, device, learning_rate, alpha = 1, iteration = None, trial = None, dataset = None, classes = None, current_dataset_file = None):
+
+    metrics = []
+    for epoch in range(epochs):
+        train_mixup_approach_on_most_confused_classes_only(net, epoch, trainloader, criterion, optimizer, device, alpha)
         best_acc = test_mixup_approach(net, epoch, testloader, criterion, best_acc, device, current_exp)
         adjust_learning_rate(learning_rate, optimizer, epoch)
 
@@ -1392,6 +1400,113 @@ def test_model(net, epoch, loader, current_exp, best_acc, criterion, device):
 
     return best_acc
 
+# def mixup_most_confused_data_only(x, y, file_path, alpha, device):
+#     '''Returns mixed inputs, pairs of targets, and lambda'''
+#     if alpha > 0:
+#         lam = np.random.beta(alpha, alpha)
+#     else:
+#         lam = 1
+
+#     batch_size = x.size()[0]
+
+#     confusing_classes = {
+#         0: [2, 8, 9],
+#         1: [0, 8, 9],
+#         2: [3, 4, 5],
+#         3: [2, 5, 6],
+#         4: [2, 6, 7],
+#         5: [2, 3, 4],
+#         6: [2, 3, 4], 
+#         7: [3, 4, 5],
+#         8: [0, 1, 9],
+#         9: [0, 1, 8],
+#     }
+
+#     # Get a random index from among the classes most confused with the class of x.
+#     index = torch.randperm(batch_size).to(device)
+
+#     # For each item in x, get an index of an element in the confusing class
+#     for item in range(len(x)):
+
+#         # Get the class label for the current item
+#         x_class_label = y[item]
+
+#         # Convert the tensor x_class_label to an integer
+#         x_class_label = x_class_label.item()
+
+#         # Get the confusing classes for the current class label
+#         x_confusing_classes = confusing_classes[x_class_label]
+
+#         # Get other files in file_path that are in the confusing class
+#         x_confusing_paths = [path for i, path in enumerate(file_path) if y[i] in x_confusing_classes]
+
+#         # Choose a random file path from confusing_paths
+#         if not len(x_confusing_paths):
+#             random_confusing_path = np.random.choice(x_confusing_paths)
+#         else:
+#             random_confusing_path = np.random.choice(file_path)
+
+#         # Get its index and add it to the file index
+#         x_confusing_index = file_path.index(random_confusing_path)
+#         index[item] = x_confusing_index
+
+#     mixed_x = lam * x + (1 - lam) * x[index, :]
+#     y_a, y_b = y, y[index]
+#     return mixed_x, y_a, y_b, lam
+
+
+def mixup_most_confused_data_only(x, y, file_path, alpha, device):
+    '''Returns mixed inputs, pairs of targets, and lambda'''
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1
+
+    batch_size = x.size()[0]
+
+    confusing_classes = {
+        0: [2, 8, 9],
+        1: [0, 8, 9],
+        2: [3, 4, 5],
+        3: [2, 5, 6],
+        4: [2, 6, 7],
+        5: [2, 3, 4],
+        6: [2, 3, 4], 
+        7: [3, 4, 5],
+        8: [0, 1, 9],
+        9: [0, 1, 8],
+    }
+
+    # Precompute and store confusing class indices for faster access
+    confusing_class_indices = {}
+    for class_label, confusing_classes_list in confusing_classes.items():
+        confusing_class_indices[class_label] = [i for i, label in enumerate(y) if label in confusing_classes_list]
+
+    # Generate random indices once
+    random_indices = torch.randperm(batch_size).to(device)
+
+    # Create an empty tensor to store mixed inputs
+    mixed_x = torch.empty_like(x)
+
+    # Create pairs of targets
+    y_a, y_b = y, y[random_indices]
+
+    # Populate mixed_x and compute mixed inputs
+    for i in range(batch_size):
+        x_class_label = y[i].item()
+        confusing_indices = confusing_class_indices.get(x_class_label, [])
+
+        if confusing_indices:
+            # Choose a random index from confusing class indices
+            random_confusing_index = np.random.choice(confusing_indices)
+            mixed_x[i] = lam * x[i] + (1 - lam) * x[random_confusing_index]
+        else:
+            # If no confusing class found, use the original sample
+            mixed_x[i] = x[i]
+
+    return mixed_x, y_a, y_b, lam
+
+
 def mixup_data(x, y, alpha, device):
     '''Returns mixed inputs, pairs of targets, and lambda'''
     if alpha > 0:
@@ -1421,6 +1536,39 @@ def train_mixup_approach(net, epoch, trainloader, criterion, optimizer, device, 
         inputs, targets = inputs.to(device), targets.to(device)
 
         inputs, targets_a, targets_b, lam = mixup_data(inputs, targets,
+                                                       alpha, device)
+        inputs, targets_a, targets_b = map(Variable, (inputs,
+                                                      targets_a, targets_b))
+        outputs = net(inputs)
+        loss = mixup_criterion(criterion, outputs, targets_a, targets_b, lam)
+        train_loss += loss.item()
+        _, predicted = torch.max(outputs.data, 1)
+        total += targets.size(0)
+        correct += (lam * predicted.eq(targets_a.data).cpu().sum().float()
+                    + (1 - lam) * predicted.eq(targets_b.data).cpu().sum().float())
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        progress_bar(batch_idx, len(trainloader),
+                     'Loss: %.3f | Reg: %.5f | Acc: %.3f%% (%d/%d)'
+                     % (train_loss/(batch_idx+1), reg_loss/(batch_idx+1),
+                        100.*correct/total, correct, total))
+    return (train_loss/batch_idx, reg_loss/batch_idx, 100.*correct/total)
+
+def train_mixup_approach_on_most_confused_classes_only(net, epoch, trainloader, criterion, optimizer, device, alpha):
+    print('\nEpoch: %d' % epoch)
+    net.train()
+    train_loss = 0
+    reg_loss = 0
+    correct = 0
+    total = 0
+    for batch_idx, data in enumerate(trainloader):
+        inputs, targets, file_paths = data
+        inputs, targets = inputs.to(device), targets.to(device)
+
+        inputs, targets_a, targets_b, lam = mixup_most_confused_data_only(inputs, targets, file_paths,
                                                        alpha, device)
         inputs, targets_a, targets_b = map(Variable, (inputs,
                                                       targets_a, targets_b))
